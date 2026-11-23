@@ -1,13 +1,13 @@
 {
-  "name": "Монета — личные финансы",
-  "short_name": "Монета",
+  "name": "ADMA — личные финансы",
+  "short_name": "ADMA",
   "description": "Минималистичный офлайн-учёт личных доходов и расходов",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#0b1120",
-  "theme_color": "#0b1120",
+  "background_color": "#000000",
+  "theme_color": "#000000",
   "lang": "ru",
   "icons": [
     {

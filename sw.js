@@ -1,4 +1,4 @@
-const CACHE_NAME = 'moneta-cache-v2';
+const CACHE_NAME = 'adma-cache-v3';
 const ASSETS = [
   './',
   './index.html',

@@ -67,6 +67,11 @@ const MONTHS_GEN_RU = [
   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
 ];
 
+const MONTHS_SHORT_RU = [
+  'янв', 'фев', 'мар', 'апр', 'май', 'июн',
+  'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
+];
+
 const state = {
   tab: 'overview',
   monthKey: currentMonthKey(),
@@ -153,10 +158,59 @@ function formatMoney(amount, { signed = false, type = null } = {}) {
   return `${prefix}${formatted}\u00A0${cur}`;
 }
 
+function formatCompactAmount(n) {
+  const abs = Math.abs(Number(n) || 0);
+  if (abs === 0) return '0';
+  if (abs >= 1_000_000) return `${(abs / 1_000_000).toFixed(1).replace(/\.0$/, '')}м`;
+  if (abs >= 10_000) return `${Math.round(abs / 1000)}к`;
+  if (abs >= 1000) return `${(abs / 1000).toFixed(1).replace(/\.0$/, '')}к`;
+  return String(Math.round(abs));
+}
+
 function getCategoryMap() {
   const map = new Map();
   for (const c of state.categories) map.set(c.id, c);
   return map;
+}
+
+function getCategoryUsageCounts() {
+  const counts = new Map();
+  for (const t of state.transactions) {
+    counts.set(t.categoryId, (counts.get(t.categoryId) || 0) + 1);
+  }
+  return counts;
+}
+
+function getSortedCategoriesForType(type) {
+  const counts = getCategoryUsageCounts();
+  return state.categories
+    .filter((c) => c.type === type)
+    .sort((a, b) => {
+      const diff = (counts.get(b.id) || 0) - (counts.get(a.id) || 0);
+      if (diff !== 0) return diff;
+      return (a.order || 0) - (b.order || 0);
+    });
+}
+
+function getTopCommentsForCategory(categoryId, limit = 4) {
+  const freq = new Map();
+  for (const t of state.transactions) {
+    if (t.categoryId !== categoryId) continue;
+    const raw = (t.comment || '').trim();
+    if (!raw || raw.length > 40) continue;
+    const key = raw.toLowerCase();
+    const cur = freq.get(key) || { text: raw, count: 0, latest: '' };
+    cur.count += 1;
+    if (t.date > cur.latest) {
+      cur.latest = t.date;
+      cur.text = raw;
+    }
+    freq.set(key, cur);
+  }
+  return [...freq.values()]
+    .sort((a, b) => b.count - a.count || b.latest.localeCompare(a.latest))
+    .slice(0, limit)
+    .map((x) => x.text);
 }
 
 function applyTheme() {
@@ -165,7 +219,7 @@ function applyTheme() {
   const effective = pref === 'system' ? (prefersDark ? 'dark' : 'light') : pref;
   document.documentElement.setAttribute('data-theme', effective);
   if (themeColorMeta) {
-    themeColorMeta.setAttribute('content', effective === 'dark' ? '#0b1120' : '#f8fafc');
+    themeColorMeta.setAttribute('content', effective === 'dark' ? '#000000' : '#f2f2f7');
   }
 }
 
@@ -234,9 +288,47 @@ function renderOverview() {
     else expense += t.amount;
   }
   const balance = income - expense;
-  const savingsRate = income > 0 ? Math.round(((income - expense) / income) * 100) : null;
   const isCurrentMonth = state.monthKey === currentMonthKey();
 
+  // Compare expenses vs previous month
+  const prevMonthKey = shiftMonth(state.monthKey, -1);
+  let prevExpense = 0;
+  for (const t of state.transactions) {
+    if (t.type === 'expense' && t.date.startsWith(prevMonthKey)) {
+      prevExpense += t.amount;
+    }
+  }
+  const [, prevMNum] = prevMonthKey.split('-').map(Number);
+  const prevShortLabel = MONTHS_SHORT_RU[prevMNum - 1];
+  let deltaHtml = '';
+  if (prevExpense > 0) {
+    const pct = Math.round(((expense - prevExpense) / prevExpense) * 100);
+    const cls = pct < 0 ? 'good' : pct > 0 ? 'bad' : '';
+    const sign = pct > 0 ? '+' : pct < 0 ? '−' : '';
+    deltaHtml = `<span class="delta-pill num ${cls}">${sign}${Math.abs(pct)}% к ${prevShortLabel}.</span>`;
+  } else if (expense > 0) {
+    deltaHtml = `<span class="delta-pill">нет данных за ${prevShortLabel}.</span>`;
+  }
+
+  // 6-month expense trend (anchor to current month if selected month is within the last 6 months)
+  const curMKey = currentMonthKey();
+  const sixBackFromCur = shiftMonth(curMKey, -5);
+  const trendAnchor = state.monthKey >= sixBackFromCur && state.monthKey <= curMKey ? curMKey : state.monthKey;
+  const trendMonths = [];
+  for (let i = 5; i >= 0; i -= 1) {
+    const mk = shiftMonth(trendAnchor, -i);
+    const [, mNum] = mk.split('-').map(Number);
+    trendMonths.push({ key: mk, label: MONTHS_SHORT_RU[mNum - 1], sum: 0 });
+  }
+  const trendMap = new Map(trendMonths.map((m) => [m.key, m]));
+  for (const t of state.transactions) {
+    if (t.type !== 'expense') continue;
+    const item = trendMap.get(t.date.slice(0, 7));
+    if (item) item.sum += t.amount;
+  }
+  const maxTrend = Math.max(1, ...trendMonths.map((m) => m.sum));
+
+  // Category breakdown for donut
   const modeTxs = monthTxs.filter((t) => t.type === state.overviewMode);
   const modeTotal = modeTxs.reduce((acc, t) => acc + t.amount, 0);
   const catMap = getCategoryMap();
@@ -257,7 +349,6 @@ function renderOverview() {
   }
   const activeItem = breakdown.find((b) => b.cat.id === state.selectedDonutCatId) || null;
 
-  // Build SVG donut segments
   const radius = 82;
   const circumference = 2 * Math.PI * radius;
   let offset = 0;
@@ -275,7 +366,7 @@ function renderOverview() {
             cx="105" cy="105" r="${radius}"
             fill="none"
             stroke="${escapeHtml(item.cat.color)}"
-            stroke-width="${isSelected ? 27 : 22}"
+            stroke-width="${isSelected ? 26 : 20}"
             stroke-dasharray="${segLen.toFixed(2)} ${(circumference - segLen).toFixed(2)}"
             stroke-dashoffset="${(-offset).toFixed(2)}"
             transform="rotate(-90 105 105)"
@@ -285,7 +376,7 @@ function renderOverview() {
           return svg;
         })
         .join('')
-    : `<circle cx="105" cy="105" r="${radius}" fill="none" stroke="var(--surface-2)" stroke-width="22"/>`;
+    : `<circle cx="105" cy="105" r="${radius}" fill="none" stroke="var(--surface-2)" stroke-width="20"/>`;
 
   const centerLabel = activeItem
     ? activeItem.cat.name
@@ -295,8 +386,10 @@ function renderOverview() {
   const centerValue = activeItem ? formatMoney(activeItem.sum) : formatMoney(modeTotal);
   const centerPct = activeItem ? `${activeItem.pct.toFixed(1)}%` : '';
 
-  const savingsClass = savingsRate === null ? '' : savingsRate >= 0 ? 'positive' : 'negative';
-  const savingsText = savingsRate === null ? 'Норма сбережений: —' : `Сбережения: ${savingsRate}%`;
+  // Recent 5 transactions of selected month
+  const recentTxs = [...monthTxs]
+    .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || 0) - (a.createdAt || 0))
+    .slice(0, 5);
 
   mainEl.innerHTML = `
     <div class="stack">
@@ -313,23 +406,47 @@ function renderOverview() {
         </button>
       </div>
 
-      <section class="card summary-hero">
-        <div class="balance-row">
+      <section class="card hero-card">
+        <div class="hero-top">
           <div>
-            <div class="muted-label">Баланс за месяц</div>
-            <div class="balance-value num">${formatMoney(balance, { signed: true })}</div>
+            <div class="muted-label">Расходы за месяц</div>
+            <div class="hero-amount num">${formatMoney(expense)}</div>
           </div>
-          <span class="savings-pill num ${savingsClass}">${savingsText}</span>
+          ${deltaHtml}
         </div>
-        <div class="metrics-2">
-          <div class="metric-box">
+        <div class="hero-submetrics">
+          <div>
             <div class="muted-label">Доходы</div>
-            <div class="metric-value num text-income">${formatMoney(income, { type: income > 0 ? 'income' : null })}</div>
+            <div class="submetric-val num text-income">${formatMoney(income, { type: income > 0 ? 'income' : null })}</div>
           </div>
-          <div class="metric-box">
-            <div class="muted-label">Расходы</div>
-            <div class="metric-value num text-expense">${formatMoney(expense, { type: expense > 0 ? 'expense' : null })}</div>
+          <div>
+            <div class="muted-label">Баланс</div>
+            <div class="submetric-val num ${balance > 0 ? 'text-income' : ''}">${formatMoney(balance, { signed: true })}</div>
           </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-header" style="margin-bottom:4px;">
+          <h2 class="section-title">Динамика расходов</h2>
+          <span class="muted-label" style="margin:0;">6 месяцев</span>
+        </div>
+        <div class="trend-bars">
+          ${trendMonths
+            .map((m) => {
+              const heightPct = m.sum > 0 ? Math.max(8, Math.round((m.sum / maxTrend) * 100)) : 4;
+              const isActive = m.key === state.monthKey;
+              return `
+                <button type="button" class="trend-col ${isActive ? 'active' : ''}" data-trend-month="${m.key}" aria-label="${escapeHtml(formatMonthLabel(m.key))}: ${formatMoney(m.sum)}">
+                  <span class="trend-bar-amt num">${formatCompactAmount(m.sum)}</span>
+                  <div class="trend-bar-track">
+                    <div class="trend-bar-fill" style="height:${heightPct}%"></div>
+                  </div>
+                  <span class="trend-bar-lbl">${m.label}</span>
+                </button>
+              `;
+            })
+            .join('')}
         </div>
       </section>
 
@@ -395,6 +512,41 @@ function renderOverview() {
                </div>`
         }
       </section>
+
+      ${
+        recentTxs.length > 0
+          ? `<section class="stack" style="gap:8px;">
+               <div class="section-header" style="margin-bottom:0;padding:0 4px;">
+                 <h2 class="section-title">Последние операции</h2>
+                 <button type="button" class="btn-link" id="seeAllTxBtn">Все →</button>
+               </div>
+               <div class="tx-list">
+                 ${recentTxs
+                   .map((t) => {
+                     const cat = catMap.get(t.categoryId) || { name: 'Без категории', icon: 'tag', color: '#64748B' };
+                     const sub = [formatDayHeader(t.date), t.comment].filter(Boolean).join(' · ');
+                     return `
+                       <button type="button" class="tx-row" data-recent-tx="${escapeHtml(t.id)}">
+                         <div class="tx-left">
+                           <span class="cat-badge" style="background:${escapeHtml(cat.color)}20;color:${escapeHtml(cat.color)}">
+                             ${svgIcon(cat.icon, 18)}
+                           </span>
+                           <div class="tx-info">
+                             <div class="tx-cat">${escapeHtml(cat.name)}</div>
+                             <div class="tx-comment">${escapeHtml(sub)}</div>
+                           </div>
+                         </div>
+                         <div class="tx-amount num ${t.type === 'income' ? 'text-income' : 'text-expense'}">
+                           ${formatMoney(t.amount, { type: t.type })}
+                         </div>
+                       </button>
+                     `;
+                   })
+                   .join('')}
+               </div>
+             </section>`
+          : ''
+      }
     </div>
   `;
 
@@ -412,6 +564,13 @@ function renderOverview() {
     state.monthKey = currentMonthKey();
     state.selectedDonutCatId = null;
     renderOverview();
+  });
+  mainEl.querySelectorAll('[data-trend-month]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.monthKey = btn.dataset.trendMonth;
+      state.selectedDonutCatId = null;
+      renderOverview();
+    });
   });
   mainEl.querySelectorAll('[data-overview-mode]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -441,6 +600,19 @@ function renderOverview() {
   document.getElementById('filterBySelectedCatBtn')?.addEventListener('click', () => {
     if (state.selectedDonutCatId) jumpToFilteredTransactions(state.selectedDonutCatId);
   });
+  document.getElementById('seeAllTxBtn')?.addEventListener('click', () => {
+    state.filters.type = 'all';
+    state.filters.categoryId = 'all';
+    state.filters.search = '';
+    state.filters.monthMode = 'selected';
+    setTab('transactions');
+  });
+  mainEl.querySelectorAll('[data-recent-tx]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tx = state.transactions.find((t) => t.id === btn.dataset.recentTx);
+      if (tx) openTransactionSheet(tx);
+    });
+  });
 }
 
 function jumpToFilteredTransactions(categoryId) {
@@ -461,15 +633,16 @@ function renderTransactionsTab() {
 
   mainEl.innerHTML = `
     <div class="stack">
+      <div class="page-title-row">
+        <h1 class="page-title">Операции</h1>
+      </div>
+
       <div class="month-bar">
         <button type="button" class="month-nav-btn" id="txPrevMonth" aria-label="Предыдущий месяц">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
         <div class="month-label-wrap">
           <span class="month-label">${state.filters.monthMode === 'all' ? 'Все месяцы' : escapeHtml(formatMonthLabel(state.monthKey))}</span>
-          <button type="button" class="today-chip" id="toggleMonthScopeBtn">
-            ${state.filters.monthMode === 'all' ? 'За месяц' : 'Все даты'}
-          </button>
         </div>
         <button type="button" class="month-nav-btn" id="txNextMonth" aria-label="Следующий месяц">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
@@ -479,16 +652,17 @@ function renderTransactionsTab() {
       <div class="filters-bar">
         <div class="search-wrap">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-          <input type="search" class="input search-input" id="txSearchInput" placeholder="Поиск по комментарию, категории или сумме..." value="${escapeHtml(state.filters.search)}">
+          <input type="search" class="input search-input" id="txSearchInput" placeholder="Поиск по комментарию, категории, сумме..." value="${escapeHtml(state.filters.search)}">
         </div>
-        <div class="filter-controls">
-          <div class="segmented">
-            <button type="button" class="seg-btn ${state.filters.type === 'all' ? 'active' : ''}" data-filter-type="all">Все</button>
-            <button type="button" class="seg-btn ${state.filters.type === 'expense' ? 'active' : ''}" data-filter-type="expense">Расходы</button>
-            <button type="button" class="seg-btn ${state.filters.type === 'income' ? 'active' : ''}" data-filter-type="income">Доходы</button>
-          </div>
-          <select class="select" id="txCatFilter" aria-label="Фильтр по категории">
-            <option value="all">Все категории</option>
+        <div class="chip-strip">
+          <button type="button" class="filter-chip ${state.filters.monthMode === 'all' ? 'active' : ''}" id="toggleMonthScopeBtn">
+            ${state.filters.monthMode === 'all' ? 'Все даты' : 'За месяц'}
+          </button>
+          <button type="button" class="filter-chip ${state.filters.type === 'all' ? 'active' : ''}" data-filter-type="all">Все</button>
+          <button type="button" class="filter-chip ${state.filters.type === 'expense' ? 'active' : ''}" data-filter-type="expense">Расходы</button>
+          <button type="button" class="filter-chip ${state.filters.type === 'income' ? 'active' : ''}" data-filter-type="income">Доходы</button>
+          <select class="filter-select-chip ${state.filters.categoryId !== 'all' ? 'active' : ''}" id="txCatFilter" aria-label="Фильтр по категории">
+            <option value="all">Категория: все</option>
             ${catOptions}
           </select>
         </div>
@@ -525,6 +699,7 @@ function renderTransactionsTab() {
   });
   document.getElementById('txCatFilter')?.addEventListener('change', (e) => {
     state.filters.categoryId = e.target.value;
+    e.target.classList.toggle('active', e.target.value !== 'all');
     renderTransactionsFeedOnly();
   });
 
@@ -561,48 +736,65 @@ function renderTransactionsFeedOnly() {
     return;
   }
 
+  let expSum = 0;
+  let incSum = 0;
   const byDay = new Map();
   for (const t of filtered) {
+    if (t.type === 'income') incSum += t.amount;
+    else expSum += t.amount;
     if (!byDay.has(t.date)) byDay.set(t.date, []);
     byDay.get(t.date).push(t);
   }
 
-  container.innerHTML = [...byDay.entries()]
-    .map(([dateStr, items]) => {
-      const dayNet = items.reduce((acc, t) => acc + (t.type === 'income' ? t.amount : -t.amount), 0);
-      return `
-        <div class="day-group">
-          <div class="day-header">
-            <span>${escapeHtml(formatDayHeader(dateStr))}</span>
-            <span class="num">${formatMoney(dayNet, { signed: true })}</span>
-          </div>
-          <div class="tx-list">
-            ${items
-              .map((t) => {
-                const cat = catMap.get(t.categoryId) || { name: 'Без категории', icon: 'tag', color: '#64748B' };
-                return `
-                  <button type="button" class="tx-row" data-edit-tx="${escapeHtml(t.id)}">
-                    <div class="tx-left">
-                      <span class="cat-badge" style="background:${escapeHtml(cat.color)}20;color:${escapeHtml(cat.color)}">
-                        ${svgIcon(cat.icon, 18)}
-                      </span>
-                      <div class="tx-info">
-                        <div class="tx-cat">${escapeHtml(cat.name)}</div>
-                        ${t.comment ? `<div class="tx-comment">${escapeHtml(t.comment)}</div>` : ''}
+  const totalsParts = [];
+  if (expSum > 0) totalsParts.push(`<span class="text-expense">${formatMoney(expSum, { type: 'expense' })}</span>`);
+  if (incSum > 0) totalsParts.push(`<span class="text-income">${formatMoney(incSum, { type: 'income' })}</span>`);
+
+  const summaryHtml = `
+    <div class="search-summary-pill">
+      <span class="num">Операций: <strong>${filtered.length}</strong></span>
+      <div class="search-summary-totals num">${totalsParts.join('')}</div>
+    </div>
+  `;
+
+  container.innerHTML =
+    summaryHtml +
+    [...byDay.entries()]
+      .map(([dateStr, items]) => {
+        const dayNet = items.reduce((acc, t) => acc + (t.type === 'income' ? t.amount : -t.amount), 0);
+        return `
+          <div class="day-group">
+            <div class="day-header">
+              <span>${escapeHtml(formatDayHeader(dateStr))}</span>
+              <span class="num">${formatMoney(dayNet, { signed: true })}</span>
+            </div>
+            <div class="tx-list">
+              ${items
+                .map((t) => {
+                  const cat = catMap.get(t.categoryId) || { name: 'Без категории', icon: 'tag', color: '#64748B' };
+                  return `
+                    <button type="button" class="tx-row" data-edit-tx="${escapeHtml(t.id)}">
+                      <div class="tx-left">
+                        <span class="cat-badge" style="background:${escapeHtml(cat.color)}20;color:${escapeHtml(cat.color)}">
+                          ${svgIcon(cat.icon, 18)}
+                        </span>
+                        <div class="tx-info">
+                          <div class="tx-cat">${escapeHtml(cat.name)}</div>
+                          ${t.comment ? `<div class="tx-comment">${escapeHtml(t.comment)}</div>` : ''}
+                        </div>
                       </div>
-                    </div>
-                    <div class="tx-amount num ${t.type === 'income' ? 'text-income' : 'text-expense'}">
-                      ${formatMoney(t.amount, { type: t.type })}
-                    </div>
-                  </button>
-                `;
-              })
-              .join('')}
+                      <div class="tx-amount num ${t.type === 'income' ? 'text-income' : 'text-expense'}">
+                        ${formatMoney(t.amount, { type: t.type })}
+                      </div>
+                    </button>
+                  `;
+                })
+                .join('')}
+            </div>
           </div>
-        </div>
-      `;
-    })
-    .join('');
+        `;
+      })
+      .join('');
 
   container.querySelectorAll('[data-edit-tx]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -666,9 +858,12 @@ function renderCategoriesTab() {
   };
 
   mainEl.innerHTML = `
-    <div class="stack" style="gap:22px;">
-      ${renderGroup('expense', 'Категории расходов')}
-      ${renderGroup('income', 'Категории доходов')}
+    <div class="stack" style="gap:20px;">
+      <div class="page-title-row">
+        <h1 class="page-title">Категории</h1>
+      </div>
+      ${renderGroup('expense', 'Расходы')}
+      ${renderGroup('income', 'Доходы')}
     </div>
   `;
 
@@ -705,6 +900,9 @@ function renderSettingsTab() {
 
   mainEl.innerHTML = `
     <div class="stack">
+      <div class="page-title-row">
+        <h1 class="page-title">Настройки</h1>
+      </div>
       ${
         needsBackup
           ? `<div class="alert-banner">
@@ -841,7 +1039,7 @@ function renderSettingsTab() {
 // ============================================================
 function openTransactionSheet(existingTx = null) {
   const type = existingTx ? existingTx.type : 'expense';
-  const catsOfType = state.categories.filter((c) => c.type === type);
+  const catsOfType = getSortedCategoriesForType(type);
   state.activeSheet = 'tx';
   state.txForm = {
     id: existingTx ? existingTx.id : null,
@@ -851,6 +1049,7 @@ function openTransactionSheet(existingTx = null) {
     date: existingTx ? existingTx.date : todayISO(0),
     comment: existingTx ? existingTx.comment || '' : '',
     createdAt: existingTx ? existingTx.createdAt : null,
+    showAllCats: false,
   };
   renderTransactionSheet();
   openSheetBackdrop();
@@ -878,69 +1077,102 @@ function evalAmountExpr(expr) {
 
 function renderTransactionSheet() {
   const f = state.txForm;
-  const cats = state.categories.filter((c) => c.type === f.type);
-  if (!cats.some((c) => c.id === f.categoryId) && cats[0]) {
-    f.categoryId = cats[0].id;
+  const allCats = getSortedCategoriesForType(f.type);
+  if (!allCats.some((c) => c.id === f.categoryId) && allCats[0]) {
+    f.categoryId = allCats[0].id;
   }
+
+  let visibleCats = allCats;
+  if (!f.showAllCats && allCats.length > 8) {
+    visibleCats = allCats.slice(0, 8);
+    if (!visibleCats.some((c) => c.id === f.categoryId)) {
+      const selectedCat = allCats.find((c) => c.id === f.categoryId);
+      if (selectedCat) visibleCats[7] = selectedCat;
+    }
+  }
+
+  const commentHints = getTopCommentsForCategory(f.categoryId, 4);
   const evaluated = evalAmountExpr(f.expr);
   const hasOp = /[+\-]/.test(f.expr.slice(1));
   const cur = state.settings.currency || '₽';
 
   sheetContainer.innerHTML = `
+    <div class="sheet-handle"></div>
     <div class="sheet-header">
-      <h3 class="sheet-title">${f.id ? 'Редактировать операцию' : 'Новая операция'}</h3>
+      <h3 class="sheet-title">${f.id ? 'Редактировать' : 'Новая операция'}</h3>
       <button type="button" class="icon-btn" id="closeSheetBtn" aria-label="Закрыть">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
     </div>
 
-    <div class="segmented segmented-full">
-      <button type="button" class="seg-btn ${f.type === 'expense' ? 'active' : ''}" data-tx-type="expense">Расход</button>
-      <button type="button" class="seg-btn ${f.type === 'income' ? 'active' : ''}" data-tx-type="income">Доход</button>
-    </div>
-
-    <div class="amount-display-box">
-      <div class="amount-expr num" id="amountExprHint">${hasOp ? `= ${evaluated.toLocaleString('ru-RU')}\u00A0${cur}` : ''}</div>
-      <div class="amount-input-row">
-        <input
-          type="text"
-          inputmode="decimal"
-          autocomplete="off"
-          class="amount-input num ${f.type === 'income' ? 'text-income' : 'text-expense'}"
-          id="txAmountInput"
-          placeholder="0"
-          value="${escapeHtml(f.expr)}"
-          aria-label="Сумма операции"
-        >
-        <span class="amount-currency ${f.type === 'income' ? 'text-income' : 'text-expense'}">${cur}</span>
+    <div class="sheet-body">
+      <div class="segmented segmented-full">
+        <button type="button" class="seg-btn ${f.type === 'expense' ? 'active' : ''}" data-tx-type="expense">Расход</button>
+        <button type="button" class="seg-btn ${f.type === 'income' ? 'active' : ''}" data-tx-type="income">Доход</button>
       </div>
-    </div>
 
-    <div class="cat-picker-grid">
-      ${cats
-        .map(
-          (c) => `
-        <button type="button" class="cat-pick-btn ${f.categoryId === c.id ? 'selected' : ''}" data-pick-cat="${escapeHtml(c.id)}">
-          <span class="cat-badge" style="background:${escapeHtml(c.color)}20;color:${escapeHtml(c.color)}">
-            ${svgIcon(c.icon, 18)}
-          </span>
-          <span class="cat-pick-label">${escapeHtml(c.name)}</span>
-        </button>
-      `
-        )
-        .join('')}
-    </div>
+      <div class="amount-display-box">
+        <div class="amount-expr num" id="amountExprHint">${hasOp ? `= ${evaluated.toLocaleString('ru-RU')}\u00A0${cur}` : ''}</div>
+        <div class="amount-input-row">
+          <input
+            type="text"
+            inputmode="decimal"
+            autocomplete="off"
+            class="amount-input num ${f.type === 'income' ? 'text-income' : 'text-expense'}"
+            id="txAmountInput"
+            placeholder="0"
+            value="${escapeHtml(f.expr)}"
+            aria-label="Сумма операции"
+          >
+          <span class="amount-currency ${f.type === 'income' ? 'text-income' : 'text-expense'}">${cur}</span>
+        </div>
+      </div>
 
-    <div class="date-comment-row">
+      <div class="stack" style="gap:8px;">
+        <div class="cat-picker-grid">
+          ${visibleCats
+            .map(
+              (c) => `
+            <button type="button" class="cat-pick-btn ${f.categoryId === c.id ? 'selected' : ''}" data-pick-cat="${escapeHtml(c.id)}">
+              <span class="cat-badge" style="background:${escapeHtml(c.color)}20;color:${escapeHtml(c.color)}">
+                ${svgIcon(c.icon, 18)}
+              </span>
+              <span class="cat-pick-label">${escapeHtml(c.name)}</span>
+            </button>
+          `
+            )
+            .join('')}
+        </div>
+        ${
+          allCats.length > 8
+            ? `<button type="button" class="btn btn-secondary btn-sm btn-full" id="toggleAllCatsBtn">
+                 ${f.showAllCats ? 'Свернуть до частых' : `Показать все категории (${allCats.length})`}
+               </button>`
+            : ''
+        }
+      </div>
+
       <div class="date-chips">
         <button type="button" class="chip-btn ${f.date === todayISO(0) ? 'active' : ''}" data-quick-date="${todayISO(0)}">Сегодня</button>
         <button type="button" class="chip-btn ${f.date === todayISO(-1) ? 'active' : ''}" data-quick-date="${todayISO(-1)}">Вчера</button>
         <input type="date" class="date-input-inline" id="txDateInput" value="${escapeHtml(f.date)}">
       </div>
-      <input type="text" class="input" id="txCommentInput" placeholder="Комментарий (необязательно)" value="${escapeHtml(f.comment)}" maxlength="120">
+
+      <div>
+        <input type="text" class="input" id="txCommentInput" placeholder="Комментарий (необязательно)" value="${escapeHtml(f.comment)}" maxlength="120">
+        ${
+          commentHints.length > 0
+            ? `<div class="comment-hints">
+                 ${commentHints
+                   .map((hint) => `<button type="button" class="hint-chip" data-comment-hint="${escapeHtml(hint)}">${escapeHtml(hint)}</button>`)
+                   .join('')}
+               </div>`
+            : ''
+        }
+      </div>
     </div>
 
-    <div class="stack" style="gap:8px;">
+    <div class="sheet-sticky-footer">
       <button type="button" class="btn btn-primary btn-full" id="saveTxBtn">${f.id ? 'Сохранить изменения' : 'Добавить операцию'}</button>
       ${f.id ? '<button type="button" class="btn btn-danger btn-full" id="deleteTxBtn">Удалить операцию</button>' : ''}
     </div>
@@ -950,6 +1182,7 @@ function renderTransactionSheet() {
   sheetContainer.querySelectorAll('[data-tx-type]').forEach((btn) => {
     btn.addEventListener('click', () => {
       f.type = btn.dataset.txType;
+      f.showAllCats = false;
       renderTransactionSheet();
     });
   });
@@ -958,6 +1191,10 @@ function renderTransactionSheet() {
       f.categoryId = btn.dataset.pickCat;
       renderTransactionSheet();
     });
+  });
+  document.getElementById('toggleAllCatsBtn')?.addEventListener('click', () => {
+    f.showAllCats = !f.showAllCats;
+    renderTransactionSheet();
   });
   sheetContainer.querySelectorAll('[data-quick-date]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -969,8 +1206,15 @@ function renderTransactionSheet() {
     f.date = e.target.value || todayISO(0);
     renderTransactionSheet();
   });
-  document.getElementById('txCommentInput')?.addEventListener('input', (e) => {
+  const commentInput = document.getElementById('txCommentInput');
+  commentInput?.addEventListener('input', (e) => {
     f.comment = e.target.value;
+  });
+  sheetContainer.querySelectorAll('[data-comment-hint]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      f.comment = btn.dataset.commentHint;
+      if (commentInput) commentInput.value = f.comment;
+    });
   });
   const amountInput = document.getElementById('txAmountInput');
   amountInput?.addEventListener('input', (e) => {
@@ -1055,6 +1299,7 @@ function openCategorySheet(existing = null, defaultType = 'expense') {
 function renderCategorySheet() {
   const c = state.catForm;
   sheetContainer.innerHTML = `
+    <div class="sheet-handle"></div>
     <div class="sheet-header">
       <h3 class="sheet-title">${c.id ? 'Редактировать категорию' : 'Новая категория'}</h3>
       <button type="button" class="icon-btn" id="closeSheetBtn" aria-label="Закрыть">
@@ -1062,7 +1307,7 @@ function renderCategorySheet() {
       </button>
     </div>
 
-    <div class="stack">
+    <div class="sheet-body">
       <div>
         <div class="muted-label">Название</div>
         <input type="text" class="input" id="catNameInput" value="${escapeHtml(c.name)}" placeholder="Например, Спорт или Такси" maxlength="40">
@@ -1092,7 +1337,9 @@ function renderCategorySheet() {
             .join('')}
         </div>
       </div>
+    </div>
 
+    <div class="sheet-sticky-footer">
       <button type="button" class="btn btn-primary btn-full" id="saveCatBtn">Сохранить</button>
     </div>
   `;
@@ -1141,13 +1388,14 @@ function openDeleteCategorySheet(cat) {
 
   state.activeSheet = 'deleteCat';
   sheetContainer.innerHTML = `
+    <div class="sheet-handle"></div>
     <div class="sheet-header">
       <h3 class="sheet-title">Удалить «${escapeHtml(cat.name)}»?</h3>
       <button type="button" class="icon-btn" id="closeSheetBtn" aria-label="Закрыть">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
     </div>
-    <div class="stack">
+    <div class="sheet-body">
       ${
         linkedCount > 0
           ? `<div class="setting-desc">В этой категории <strong>${linkedCount}</strong> опер. Выберите, куда их перенести:</div>
@@ -1156,6 +1404,8 @@ function openDeleteCategorySheet(cat) {
              </select>`
           : '<div class="setting-desc">В этой категории нет операций. Она будет удалена без потерь.</div>'
       }
+    </div>
+    <div class="sheet-sticky-footer">
       <div class="btn-row">
         <button type="button" class="btn btn-secondary" id="cancelDelCatBtn" style="flex:1">Отмена</button>
         <button type="button" class="btn btn-danger" id="confirmDelCatBtn" style="flex:1">Удалить</button>
@@ -1304,13 +1554,14 @@ function openCsvImportPreview(csvText, fileName) {
   state.csvPreview = { rows, newCats, duplicateCount, skipDuplicates: true };
 
   sheetContainer.innerHTML = `
+    <div class="sheet-handle"></div>
     <div class="sheet-header">
       <h3 class="sheet-title">Импорт CSV</h3>
       <button type="button" class="icon-btn" id="closeSheetBtn" aria-label="Закрыть">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
     </div>
-    <div class="stack">
+    <div class="sheet-body">
       <div class="preview-box">
         <div><strong>Файл:</strong> ${escapeHtml(fileName)}</div>
         <div class="num"><strong>Найдено операций:</strong> ${rows.length}</div>
@@ -1326,7 +1577,8 @@ function openCsvImportPreview(csvText, fileName) {
         <input type="checkbox" id="skipDupCheckbox" checked>
         <span>Пропускать дубликаты (дата + тип + сумма + категория + комментарий)</span>
       </label>
-
+    </div>
+    <div class="sheet-sticky-footer">
       <div class="btn-row">
         <button type="button" class="btn btn-secondary" id="cancelCsvBtn" style="flex:1">Отмена</button>
         <button type="button" class="btn btn-primary" id="confirmCsvBtn" style="flex:1">Импортировать</button>
@@ -1432,14 +1684,14 @@ function handleExportCsv() {
     ].join(','));
   }
   const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
-  downloadBlob(blob, `moneta-export-${todayISO(0)}.csv`);
+  downloadBlob(blob, `adma-export-${todayISO(0)}.csv`);
   showToast(`Экспортировано операций: ${sorted.length}`);
 }
 
 async function handleExportJson() {
   const payload = await exportFullBackup();
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8;' });
-  downloadBlob(blob, `moneta-backup-${todayISO(0)}.json`);
+  downloadBlob(blob, `adma-backup-${todayISO(0)}.json`);
   await reloadData();
   if (state.tab === 'settings') renderSettingsTab();
   showToast('Резервная копия JSON сохранена');
@@ -1450,18 +1702,21 @@ function openRestoreJsonConfirmSheet(backupObj, fileName) {
   const catCnt = backupObj?.data?.categories?.length ?? 0;
   state.activeSheet = 'restoreJson';
   sheetContainer.innerHTML = `
+    <div class="sheet-handle"></div>
     <div class="sheet-header">
       <h3 class="sheet-title">Восстановить из JSON?</h3>
       <button type="button" class="icon-btn" id="closeSheetBtn" aria-label="Закрыть">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
     </div>
-    <div class="stack">
+    <div class="sheet-body">
       <div class="preview-box">
         <div><strong>Файл:</strong> ${escapeHtml(fileName)}</div>
         <div class="num"><strong>Операций:</strong> ${txCnt} · <strong>Категорий:</strong> ${catCnt}</div>
         <div>Текущие данные на этом устройстве будут заменены содержимым резервной копии.</div>
       </div>
+    </div>
+    <div class="sheet-sticky-footer">
       <div class="btn-row">
         <button type="button" class="btn btn-secondary" id="cancelRestoreBtn" style="flex:1">Отмена</button>
         <button type="button" class="btn btn-primary" id="confirmRestoreBtn" style="flex:1">Восстановить</button>
@@ -1489,13 +1744,14 @@ function openClearAllConfirmSheet() {
   state.activeSheet = 'clearAll';
   const renderConfirm = () => {
     sheetContainer.innerHTML = `
+      <div class="sheet-handle"></div>
       <div class="sheet-header">
         <h3 class="sheet-title">${step === 1 ? 'Удалить все данные?' : 'Подтвердите удаление'}</h3>
         <button type="button" class="icon-btn" id="closeSheetBtn" aria-label="Закрыть">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
       </div>
-      <div class="stack">
+      <div class="sheet-body">
         <div class="setting-desc">
           ${
             step === 1
@@ -1503,6 +1759,8 @@ function openClearAllConfirmSheet() {
               : 'Нажмите «Удалить навсегда» для полного сброса локальной базы данных.'
           }
         </div>
+      </div>
+      <div class="sheet-sticky-footer">
         <div class="btn-row">
           <button type="button" class="btn btn-secondary" id="cancelClearBtn" style="flex:1">Отмена</button>
           <button type="button" class="btn btn-danger" id="confirmClearBtn" style="flex:1">
