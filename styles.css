@@ -1,19 +1,22 @@
 :root {
-  --bg: #f2f2f7;
+  --bg: #f4f4f5;
   --surface: #ffffff;
-  --surface-2: #e9e9ef;
-  --surface-hover: #dcdce4;
-  --text: #111113;
+  --surface-2: #e4e4e7;
+  --surface-hover: #d4d4d8;
+  --text: #09090b;
   --text-secondary: #52525b;
-  --text-muted: #8e8e93;
-  --border: rgba(17, 17, 19, 0.06);
-  --accent: #111113;
-  --accent-text: #ffffff;
-  --accent-hover: #27272a;
-  --accent-soft: rgba(17, 17, 19, 0.08);
+  --text-muted: #71717a;
+  --border: rgba(9, 9, 11, 0.09);
+  --grid-line: rgba(9, 9, 11, 0.06);
+  --bar-idle: #d4d4d8;
+  --accent: #c8ff2e;
+  --accent-text: #09090b;
+  --accent-hover: #b8f21b;
+  --accent-soft: rgba(200, 255, 46, 0.24);
+  --accent-glow: rgba(163, 230, 53, 0.28);
   --income: #059669;
   --income-soft: rgba(5, 150, 105, 0.12);
-  --expense: #111113;
+  --expense: #09090b;
   --danger: #dc2626;
   --danger-soft: rgba(220, 38, 38, 0.1);
   --warning: #d97706;
@@ -24,31 +27,34 @@
   --radius-md: 20px;
   --radius-lg: 26px;
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", Roboto, sans-serif;
-  --nav-height: 64px;
+  --nav-height: 76px;
 }
 
 [data-theme="dark"] {
-  --bg: #000000;
-  --surface: #141416;
-  --surface-2: #1f1f23;
-  --surface-hover: #2c2c32;
-  --text: #f5f5f7;
+  --bg: #09090b;
+  --surface: #121215;
+  --surface-2: #1c1c21;
+  --surface-hover: #27272e;
+  --text: #fafafa;
   --text-secondary: #a1a1aa;
   --text-muted: #71717a;
-  --border: rgba(255, 255, 255, 0.06);
-  --accent: #f5f5f7;
+  --border: rgba(255, 255, 255, 0.09);
+  --grid-line: rgba(255, 255, 255, 0.055);
+  --bar-idle: #3f4450;
+  --accent: #c8ff2e;
   --accent-text: #09090b;
-  --accent-hover: #ffffff;
-  --accent-soft: rgba(245, 245, 247, 0.12);
+  --accent-hover: #d8ff66;
+  --accent-soft: rgba(200, 255, 46, 0.14);
+  --accent-glow: rgba(200, 255, 46, 0.26);
   --income: #34d399;
   --income-soft: rgba(52, 211, 153, 0.14);
-  --expense: #f5f5f7;
+  --expense: #fafafa;
   --danger: #fb7185;
   --danger-soft: rgba(251, 113, 133, 0.14);
   --warning: #fbbf24;
   --warning-soft: rgba(251, 191, 36, 0.14);
   --shadow-sm: none;
-  --shadow-md: 0 22px 54px rgba(0, 0, 0, 0.65);
+  --shadow-md: 0 22px 54px rgba(0, 0, 0, 0.72);
 }
 
 *, *::before, *::after {
@@ -173,21 +179,23 @@ button {
   flex: 1;
 }
 
-/* Bottom Navigation (Mobile iOS Tab Bar) */
+/* Bottom Navigation (Swiss Floating Dock) */
 .bottom-nav {
   position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  left: 12px;
+  right: 12px;
+  bottom: calc(10px + env(safe-area-inset-bottom));
   z-index: 30;
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   backdrop-filter: blur(22px);
   -webkit-backdrop-filter: blur(22px);
-  border-top: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: 24px;
   display: grid;
   grid-template-columns: 1fr 1fr auto 1fr 1fr;
   align-items: center;
-  padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+  padding: 7px 6px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.42);
 }
 
 .bottom-nav-item {
@@ -208,23 +216,23 @@ button {
 }
 
 .bottom-nav-icon svg {
-  width: 22px;
-  height: 22px;
+  width: 21px;
+  height: 21px;
   display: block;
 }
 
 .fab-btn {
   width: 48px;
-  height: 48px;
-  margin: -10px 10px 0;
-  border-radius: 50%;
+  height: 44px;
+  margin: 0 8px;
+  border-radius: 15px;
   background: var(--accent);
   color: var(--accent-text);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
-  transition: transform 0.12s;
+  box-shadow: 0 0 22px var(--accent-glow);
+  transition: transform 0.12s, background 0.15s;
 }
 
 .fab-btn:active { transform: scale(0.92); }
@@ -289,6 +297,7 @@ button {
 /* Cards & Layout */
 .card {
   background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 18px;
   box-shadow: var(--shadow-sm);
@@ -310,9 +319,86 @@ button {
 
 .section-title {
   margin: 0;
-  font-size: 16px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* Overview top row: ADMA wordmark (mobile) + День/Неделя/Месяц pill */
+.overview-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 2px 0;
+}
+
+.mobile-brand-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-brand {
   font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: 20px;
+  letter-spacing: 0.1em;
+}
+
+.sync-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.sync-dot.synced { background: var(--income); }
+.sync-dot.syncing { background: var(--accent); animation: pulseDot 1s infinite; }
+.sync-dot.error { background: var(--danger); }
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
+
+.period-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.period-pill {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  transition: background 0.14s, color 0.14s;
+}
+
+.period-pill:hover { color: var(--text); }
+
+.period-pill.active {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+.tech-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 5px;
 }
 
 .page-title-row {
@@ -446,14 +532,20 @@ button {
 .text-expense { color: var(--expense); }
 .text-danger { color: var(--danger); }
 
-/* 6-Month Bar Trend */
+/* Precision Grid Bar Trend (7 days / 6 weeks / 6 months) */
 .trend-bars {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(var(--trend-cols, 6), 1fr);
   gap: 8px;
   align-items: end;
-  height: 112px;
-  padding-top: 14px;
+  height: 138px;
+  padding: 14px 6px 6px;
+  border-radius: 14px;
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 38px 28px;
+  border: 1px solid var(--border);
 }
 
 .trend-col {
@@ -464,15 +556,15 @@ button {
   height: 100%;
   justify-content: flex-end;
   border-radius: 10px;
-  padding: 4px 2px;
+  padding: 2px 1px;
   transition: background 0.15s;
 }
 
-.trend-col:hover { background: var(--surface-2); }
+.trend-col:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
 
 .trend-bar-track {
   width: 100%;
-  max-width: 30px;
+  max-width: 34px;
   flex: 1;
   display: flex;
   align-items: flex-end;
@@ -480,14 +572,15 @@ button {
 
 .trend-bar-fill {
   width: 100%;
-  border-radius: 7px;
-  background: var(--surface-2);
-  min-height: 6px;
-  transition: height 0.25s ease, background 0.15s;
+  border-radius: 6px 6px 2px 2px;
+  background: var(--bar-idle);
+  min-height: 5px;
+  transition: height 0.25s ease, background 0.15s, box-shadow 0.15s;
 }
 
 .trend-col.active .trend-bar-fill {
   background: var(--accent);
+  box-shadow: 0 0 18px var(--accent-glow);
 }
 
 .trend-bar-amt {
@@ -498,13 +591,13 @@ button {
 
 .trend-col.active .trend-bar-amt {
   color: var(--text);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .trend-bar-lbl {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-muted);
-  text-transform: capitalize;
+  white-space: nowrap;
 }
 
 .trend-col.active .trend-bar-lbl {
@@ -811,6 +904,7 @@ button {
 
 .tx-list {
   background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
 }
@@ -870,6 +964,7 @@ button {
 
 .cat-card {
   background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 12px 14px;
   display: flex;
@@ -1267,6 +1362,8 @@ button {
 @media (min-width: 768px) {
   .top-bar { display: block; }
   .bottom-nav { display: none; }
+  .mobile-brand-wrap { display: none; }
+  .overview-topbar { justify-content: flex-end; }
   .main-content { padding: 24px 20px 44px; }
   .overview-grid {
     grid-template-columns: 280px 1fr;

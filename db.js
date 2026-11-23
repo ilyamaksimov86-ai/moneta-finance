@@ -21,9 +21,14 @@ export const DEFAULT_CATEGORIES = [
 
 export const DEFAULT_SETTINGS = {
   currency: '₽',
-  theme: 'system',
+  theme: 'dark',
   demoCleared: false,
   lastBackupAt: null,
+  ghRepo: 'ilyamaksimov86-ai/adma-finance-data',
+  ghPath: 'data.json',
+  ghToken: '',
+  ghLastSyncAt: null,
+  localUpdatedAt: 0,
 };
 
 let dbPromise = null;
@@ -283,22 +288,28 @@ export async function clearAllData() {
   await txPromise(tx);
 }
 
-export async function exportFullBackup() {
+export async function exportFullBackup({ markBackup = true } = {}) {
   const [transactions, categories, settings] = await Promise.all([
     getAllTransactions(),
     getAllCategories(),
     getSettings(),
   ]);
   const now = Date.now();
-  await setSetting('lastBackupAt', now);
+  if (markBackup) {
+    await setSetting('lastBackupAt', now);
+  }
+  const safeSettings = { ...settings };
+  delete safeSettings.ghToken;
+  if (markBackup) safeSettings.lastBackupAt = now;
   return {
-    app: 'Moneta',
-    version: 1,
+    app: 'ADMA',
+    version: 2,
     exportedAt: new Date(now).toISOString(),
+    updatedAt: settings.localUpdatedAt || now,
     data: {
       transactions,
       categories,
-      settings: { ...settings, lastBackupAt: now },
+      settings: safeSettings,
     },
   };
 }
@@ -312,6 +323,7 @@ export async function importFullBackup(backupObj) {
     throw new Error('В файле отсутствуют списки операций или категорий');
   }
 
+  const currentSettings = await getSettings();
   const db = await openDB();
   const tx = db.transaction(['transactions', 'categories', 'settings'], 'readwrite');
   const txStore = tx.objectStore('transactions');
@@ -328,7 +340,16 @@ export async function importFullBackup(backupObj) {
   for (const item of transactions) {
     if (item && item.id && item.date && item.categoryId) txStore.put(item);
   }
-  const mergedSettings = { ...DEFAULT_SETTINGS, ...(settings || {}), demoCleared: true };
+  const mergedSettings = {
+    ...DEFAULT_SETTINGS,
+    ...(settings || {}),
+    demoCleared: true,
+    ghToken: currentSettings.ghToken || '',
+    ghRepo: currentSettings.ghRepo || DEFAULT_SETTINGS.ghRepo,
+    ghPath: currentSettings.ghPath || DEFAULT_SETTINGS.ghPath,
+    ghLastSyncAt: currentSettings.ghLastSyncAt || null,
+    localUpdatedAt: backupObj.updatedAt || Date.now(),
+  };
   for (const [key, value] of Object.entries(mergedSettings)) {
     setStore.put({ key, value });
   }

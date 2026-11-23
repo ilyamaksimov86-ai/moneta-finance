@@ -72,14 +72,30 @@ const MONTHS_SHORT_RU = [
   'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
 ];
 
+const WEEKDAYS_SHORT_RU = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+
 const state = {
   tab: 'overview',
+  periodMode: 'month', // 'day' | 'week' | 'month'
+  selectedDate: todayISO(0),
   monthKey: currentMonthKey(),
   overviewMode: 'expense',
   selectedDonutCatId: null,
   transactions: [],
   categories: [],
-  settings: { currency: '₽', theme: 'system', demoCleared: false, lastBackupAt: null },
+  settings: {
+    currency: '₽',
+    theme: 'dark',
+    demoCleared: false,
+    lastBackupAt: null,
+    ghRepo: 'ilyamaksimov86-ai/adma-finance-data',
+    ghPath: 'data.json',
+    ghToken: '',
+    ghLastSyncAt: null,
+    localUpdatedAt: 0,
+  },
+  syncStatus: 'idle', // 'idle' | 'syncing' | 'synced' | 'error'
+  syncError: '',
   filters: {
     search: '',
     type: 'all',
@@ -122,6 +138,56 @@ function todayISO(offsetDays = 0) {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function parseISO(iso) {
+  const [y, m, d] = String(iso || todayISO(0)).split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
+function toISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function shiftDay(iso, delta) {
+  const d = parseISO(iso);
+  d.setDate(d.getDate() + delta);
+  return toISO(d);
+}
+
+function getWeekStartISO(iso) {
+  const d = parseISO(iso);
+  const dow = d.getDay(); // 0=Sun..6=Sat
+  const diffToMon = dow === 0 ? -6 : 1 - dow;
+  d.setDate(d.getDate() + diffToMon);
+  return toISO(d);
+}
+
+function getWeekEndISO(weekStartIso) {
+  return shiftDay(weekStartIso, 6);
+}
+
+function formatDayPeriodLabel(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (iso === todayISO(0)) return `Сегодня, ${d} ${MONTHS_SHORT_RU[m - 1]}`;
+  if (iso === todayISO(-1)) return `Вчера, ${d} ${MONTHS_SHORT_RU[m - 1]}`;
+  const thisYear = new Date().getFullYear();
+  return y === thisYear ? `${d} ${MONTHS_GEN_RU[m - 1]}` : `${d} ${MONTHS_GEN_RU[m - 1]} ${y}`;
+}
+
+function formatWeekRangeLabel(weekStartIso) {
+  const weekEndIso = getWeekEndISO(weekStartIso);
+  const [y1, m1, d1] = weekStartIso.split('-').map(Number);
+  const [y2, m2, d2] = weekEndIso.split('-').map(Number);
+  const thisYear = new Date().getFullYear();
+  const yearSuffix = y2 !== thisYear ? ` ${y2}` : '';
+  if (m1 === m2) return `${d1}–${d2} ${MONTHS_SHORT_RU[m1 - 1]}${yearSuffix}`;
+  return `${d1} ${MONTHS_SHORT_RU[m1 - 1]} – ${d2} ${MONTHS_SHORT_RU[m2 - 1]}${yearSuffix}`;
+}
+
+function formatShortDDMM(iso) {
+  const [, m, d] = iso.split('-');
+  return `${d}.${m}`;
 }
 
 function shiftMonth(monthKey, delta) {
@@ -214,12 +280,12 @@ function getTopCommentsForCategory(categoryId, limit = 4) {
 }
 
 function applyTheme() {
-  const pref = state.settings.theme || 'system';
+  const pref = state.settings.theme || 'dark';
   const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
   const effective = pref === 'system' ? (prefersDark ? 'dark' : 'light') : pref;
   document.documentElement.setAttribute('data-theme', effective);
   if (themeColorMeta) {
-    themeColorMeta.setAttribute('content', effective === 'dark' ? '#000000' : '#f2f2f7');
+    themeColorMeta.setAttribute('content', effective === 'dark' ? '#09090b' : '#f4f4f5');
   }
 }
 
@@ -269,6 +335,186 @@ function setTab(tab) {
   renderMain();
 }
 
+// ============================================================
+// GITHUB AUTO-SYNC (Private Repo JSON Snapshot)
+// ============================================================
+let autoSyncTimer = null;
+
+function utf8ToBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function base64ToUtf8(b64) {
+  const binary = atob(b64.replace(/\s+/g, ''));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function updateSyncIndicatorDOM() {
+  document.querySelectorAll('[data-sync-dot]').forEach((dot) => {
+    dot.className = `sync-dot ${state.syncStatus}`;
+    const label =
+      state.syncStatus === 'syncing'
+        ? 'Синхронизация с GitHub...'
+        : state.syncStatus === 'synced'
+          ? 'Синхронизировано с GitHub'
+          : state.syncStatus === 'error'
+            ? `Ошибка синхронизации: ${state.syncError || 'проверьте токен'}`
+            : 'GitHub Sync не подключён';
+    dot.title = label;
+  });
+}
+
+function isGitHubConfigured() {
+  return Boolean((state.settings.ghToken || '').trim() && (state.settings.ghRepo || '').trim());
+}
+
+async function ghApiFetch(path, options = {}) {
+  const token = (state.settings.ghToken || '').trim();
+  const res = await fetch(`https://api.github.com${path}`, {
+    ...options,
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`,
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  return res;
+}
+
+async function pushToGitHub({ silent = true } = {}) {
+  if (!isGitHubConfigured() || !navigator.onLine) return false;
+  const repo = state.settings.ghRepo.trim();
+  const filePath = (state.settings.ghPath || 'data.json').trim();
+
+  state.syncStatus = 'syncing';
+  state.syncError = '';
+  updateSyncIndicatorDOM();
+
+  try {
+    let sha;
+    const getRes = await ghApiFetch(`/repos/${repo}/contents/${encodeURIComponent(filePath)}?t=${Date.now()}`);
+    if (getRes.ok) {
+      const meta = await getRes.json();
+      sha = meta.sha;
+    } else if (getRes.status !== 404) {
+      throw new Error(`GitHub HTTP ${getRes.status}`);
+    }
+
+    const payload = await exportFullBackup({ markBackup: false });
+    const content = utf8ToBase64(JSON.stringify(payload, null, 2));
+    const putBody = {
+      message: `ADMA auto-sync (${payload.data.transactions.length} tx)`,
+      content,
+      ...(sha ? { sha } : {}),
+    };
+
+    const putRes = await ghApiFetch(`/repos/${repo}/contents/${encodeURIComponent(filePath)}`, {
+      method: 'PUT',
+      body: JSON.stringify(putBody),
+    });
+    if (!putRes.ok) {
+      const errText = await putRes.text().catch(() => '');
+      throw new Error(`HTTP ${putRes.status}${errText ? ': ' + errText.slice(0, 80) : ''}`);
+    }
+
+    const now = Date.now();
+    await setSetting('ghLastSyncAt', now);
+    await setSetting('lastBackupAt', now);
+    state.settings.ghLastSyncAt = now;
+    state.settings.lastBackupAt = now;
+    state.syncStatus = 'synced';
+    updateSyncIndicatorDOM();
+    if (!silent) showToast('Сохранено в GitHub');
+    if (state.tab === 'settings') renderSettingsTab();
+    return true;
+  } catch (err) {
+    state.syncStatus = 'error';
+    state.syncError = err.message || 'Ошибка сети';
+    updateSyncIndicatorDOM();
+    if (!silent) showToast(`Ошибка GitHub: ${state.syncError}`);
+    return false;
+  }
+}
+
+async function pullFromGitHub({ force = false, silent = true } = {}) {
+  if (!isGitHubConfigured() || !navigator.onLine) return false;
+  const repo = state.settings.ghRepo.trim();
+  const filePath = (state.settings.ghPath || 'data.json').trim();
+
+  state.syncStatus = 'syncing';
+  state.syncError = '';
+  updateSyncIndicatorDOM();
+
+  try {
+    const res = await ghApiFetch(`/repos/${repo}/contents/${encodeURIComponent(filePath)}?t=${Date.now()}`);
+    if (res.status === 404) {
+      // No cloud file yet — push local data up
+      return await pushToGitHub({ silent });
+    }
+    if (!res.ok) throw new Error(`GitHub HTTP ${res.status}`);
+
+    const meta = await res.json();
+    if (!meta.content) throw new Error('Пустой файл в GitHub');
+    const remote = JSON.parse(base64ToUtf8(meta.content));
+
+    const remoteUpdated = Number(remote.updatedAt) || 0;
+    const localUpdated = Number(state.settings.localUpdatedAt) || 0;
+    const onlyDemoLocal = !state.settings.demoCleared && state.transactions.every((t) => t.isDemo);
+    const remoteHasReal = Array.isArray(remote?.data?.transactions) && remote.data.transactions.length > 0;
+
+    if (force || (onlyDemoLocal && remoteHasReal) || remoteUpdated > localUpdated) {
+      await importFullBackup(remote);
+      const now = Date.now();
+      await setSetting('ghLastSyncAt', now);
+      await setSetting('lastBackupAt', now);
+      await reloadData();
+      state.syncStatus = 'synced';
+      updateSyncIndicatorDOM();
+      renderMain();
+      showToast(`Синхронизировано из GitHub (${state.transactions.length} опер.)`);
+      return true;
+    }
+
+    if (localUpdated > remoteUpdated) {
+      return await pushToGitHub({ silent });
+    }
+
+    state.syncStatus = 'synced';
+    updateSyncIndicatorDOM();
+    if (!silent) showToast('Данные уже актуальны');
+    return true;
+  } catch (err) {
+    state.syncStatus = 'error';
+    state.syncError = err.message || 'Ошибка чтения';
+    updateSyncIndicatorDOM();
+    if (!silent) showToast(`Ошибка GitHub: ${state.syncError}`);
+    return false;
+  }
+}
+
+async function scheduleAutoSync() {
+  const now = Date.now();
+  await setSetting('localUpdatedAt', now);
+  state.settings.localUpdatedAt = now;
+  if (!isGitHubConfigured()) return;
+  clearTimeout(autoSyncTimer);
+  autoSyncTimer = setTimeout(() => {
+    pushToGitHub({ silent: true });
+  }, 1500);
+}
+
 function renderMain() {
   if (state.tab === 'overview') renderOverview();
   else if (state.tab === 'transactions') renderTransactionsTab();
@@ -277,59 +523,217 @@ function renderMain() {
 }
 
 // ============================================================
-// OVERVIEW TAB
+// OVERVIEW TAB (День / Неделя / Месяц + Swiss Neo-Bank)
 // ============================================================
+function getPeriodContext() {
+  const mode = state.periodMode;
+
+  if (mode === 'day') {
+    const d = state.selectedDate || todayISO(0);
+    const prevD = shiftDay(d, -1);
+    const isCurrent = d === todayISO(0);
+    const [, pm, pd] = prevD.split('-').map(Number);
+    const prevCompareLabel = isCurrent ? 'ко вчера' : `к ${pd} ${MONTHS_SHORT_RU[pm - 1]}`;
+
+    // 7-day trend window
+    const today = todayISO(0);
+    const sixDaysAgo = shiftDay(today, -6);
+    const anchor = d >= sixDaysAgo && d <= today ? today : d;
+    const bars = [];
+    for (let i = 6; i >= 0; i -= 1) {
+      const iso = shiftDay(anchor, -i);
+      const dow = parseISO(iso).getDay();
+      bars.push({
+        key: iso,
+        label: WEEKDAYS_SHORT_RU[dow],
+        title: formatDayPeriodLabel(iso),
+        sum: 0,
+        isActive: iso === d,
+      });
+    }
+    const barMap = new Map(bars.map((b) => [b.key, b]));
+    for (const t of state.transactions) {
+      if (t.type !== 'expense') continue;
+      const item = barMap.get(t.date);
+      if (item) item.sum += t.amount;
+    }
+
+    return {
+      mode,
+      label: formatDayPeriodLabel(d),
+      heroTitle: 'Расходы за день',
+      trendTitle: 'Динамика расходов',
+      trendSub: '7 дней',
+      trendCols: 7,
+      isCurrent,
+      resetLabel: 'Сегодня',
+      prevCompareLabel,
+      inCurrent: (t) => t.date === d,
+      inPrev: (t) => t.date === prevD,
+      bars,
+      step: (delta) => {
+        state.selectedDate = shiftDay(d, delta);
+        state.monthKey = state.selectedDate.slice(0, 7);
+      },
+      reset: () => {
+        state.selectedDate = todayISO(0);
+        state.monthKey = currentMonthKey();
+      },
+      selectBar: (key) => {
+        state.selectedDate = key;
+        state.monthKey = key.slice(0, 7);
+      },
+    };
+  }
+
+  if (mode === 'week') {
+    const ws = getWeekStartISO(state.selectedDate || todayISO(0));
+    const we = getWeekEndISO(ws);
+    const prevWs = shiftDay(ws, -7);
+    const prevWe = shiftDay(ws, -1);
+    const curWs = getWeekStartISO(todayISO(0));
+    const isCurrent = ws === curWs;
+
+    // 6-week trend window
+    const fiveWeeksAgo = shiftDay(curWs, -35);
+    const anchorWs = ws >= fiveWeeksAgo && ws <= curWs ? curWs : ws;
+    const bars = [];
+    for (let i = 5; i >= 0; i -= 1) {
+      const bStart = shiftDay(anchorWs, -i * 7);
+      const bEnd = getWeekEndISO(bStart);
+      bars.push({
+        key: bStart,
+        end: bEnd,
+        label: formatShortDDMM(bStart),
+        title: formatWeekRangeLabel(bStart),
+        sum: 0,
+        isActive: bStart === ws,
+      });
+    }
+    for (const t of state.transactions) {
+      if (t.type !== 'expense') continue;
+      for (const b of bars) {
+        if (t.date >= b.key && t.date <= b.end) {
+          b.sum += t.amount;
+          break;
+        }
+      }
+    }
+
+    return {
+      mode,
+      label: formatWeekRangeLabel(ws),
+      heroTitle: 'Расходы за неделю',
+      trendTitle: 'Динамика расходов',
+      trendSub: '6 недель',
+      trendCols: 6,
+      isCurrent,
+      resetLabel: 'Эта неделя',
+      prevCompareLabel: 'к пр. нед.',
+      inCurrent: (t) => t.date >= ws && t.date <= we,
+      inPrev: (t) => t.date >= prevWs && t.date <= prevWe,
+      bars,
+      step: (delta) => {
+        state.selectedDate = shiftDay(ws, delta * 7);
+        state.monthKey = state.selectedDate.slice(0, 7);
+      },
+      reset: () => {
+        state.selectedDate = todayISO(0);
+        state.monthKey = currentMonthKey();
+      },
+      selectBar: (key) => {
+        state.selectedDate = key;
+        state.monthKey = key.slice(0, 7);
+      },
+    };
+  }
+
+  // mode === 'month'
+  const mk = state.monthKey;
+  const prevMk = shiftMonth(mk, -1);
+  const curMk = currentMonthKey();
+  const isCurrent = mk === curMk;
+  const [, prevMNum] = prevMk.split('-').map(Number);
+  const prevShortLabel = MONTHS_SHORT_RU[prevMNum - 1];
+
+  const sixBackFromCur = shiftMonth(curMk, -5);
+  const trendAnchor = mk >= sixBackFromCur && mk <= curMk ? curMk : mk;
+  const bars = [];
+  for (let i = 5; i >= 0; i -= 1) {
+    const mKey = shiftMonth(trendAnchor, -i);
+    const [, mNum] = mKey.split('-').map(Number);
+    bars.push({
+      key: mKey,
+      label: MONTHS_SHORT_RU[mNum - 1],
+      title: formatMonthLabel(mKey),
+      sum: 0,
+      isActive: mKey === mk,
+    });
+  }
+  const barMap = new Map(bars.map((b) => [b.key, b]));
+  for (const t of state.transactions) {
+    if (t.type !== 'expense') continue;
+    const item = barMap.get(t.date.slice(0, 7));
+    if (item) item.sum += t.amount;
+  }
+
+  return {
+    mode: 'month',
+    label: formatMonthLabel(mk),
+    heroTitle: 'Расходы за месяц',
+    trendTitle: 'Динамика расходов',
+    trendSub: '6 месяцев',
+    trendCols: 6,
+    isCurrent,
+    resetLabel: 'Текущий',
+    prevCompareLabel: `к ${prevShortLabel}.`,
+    inCurrent: (t) => t.date.startsWith(mk),
+    inPrev: (t) => t.date.startsWith(prevMk),
+    bars,
+    step: (delta) => {
+      state.monthKey = shiftMonth(mk, delta);
+    },
+    reset: () => {
+      state.monthKey = currentMonthKey();
+    },
+    selectBar: (key) => {
+      state.monthKey = key;
+    },
+  };
+}
+
 function renderOverview() {
-  const monthTxs = state.transactions.filter((t) => t.date.startsWith(state.monthKey));
+  const ctx = getPeriodContext();
+  const periodTxs = state.transactions.filter(ctx.inCurrent);
   let income = 0;
   let expense = 0;
-  for (const t of monthTxs) {
+  for (const t of periodTxs) {
     if (t.type === 'income') income += t.amount;
     else expense += t.amount;
   }
   const balance = income - expense;
-  const isCurrentMonth = state.monthKey === currentMonthKey();
 
-  // Compare expenses vs previous month
-  const prevMonthKey = shiftMonth(state.monthKey, -1);
   let prevExpense = 0;
   for (const t of state.transactions) {
-    if (t.type === 'expense' && t.date.startsWith(prevMonthKey)) {
+    if (t.type === 'expense' && ctx.inPrev(t)) {
       prevExpense += t.amount;
     }
   }
-  const [, prevMNum] = prevMonthKey.split('-').map(Number);
-  const prevShortLabel = MONTHS_SHORT_RU[prevMNum - 1];
+
   let deltaHtml = '';
   if (prevExpense > 0) {
     const pct = Math.round(((expense - prevExpense) / prevExpense) * 100);
     const cls = pct < 0 ? 'good' : pct > 0 ? 'bad' : '';
     const sign = pct > 0 ? '+' : pct < 0 ? '−' : '';
-    deltaHtml = `<span class="delta-pill num ${cls}">${sign}${Math.abs(pct)}% к ${prevShortLabel}.</span>`;
+    deltaHtml = `<span class="delta-pill num ${cls}">${sign}${Math.abs(pct)}% ${ctx.prevCompareLabel}</span>`;
   } else if (expense > 0) {
-    deltaHtml = `<span class="delta-pill">нет данных за ${prevShortLabel}.</span>`;
+    deltaHtml = `<span class="delta-pill">нет данных ${ctx.prevCompareLabel}</span>`;
   }
 
-  // 6-month expense trend (anchor to current month if selected month is within the last 6 months)
-  const curMKey = currentMonthKey();
-  const sixBackFromCur = shiftMonth(curMKey, -5);
-  const trendAnchor = state.monthKey >= sixBackFromCur && state.monthKey <= curMKey ? curMKey : state.monthKey;
-  const trendMonths = [];
-  for (let i = 5; i >= 0; i -= 1) {
-    const mk = shiftMonth(trendAnchor, -i);
-    const [, mNum] = mk.split('-').map(Number);
-    trendMonths.push({ key: mk, label: MONTHS_SHORT_RU[mNum - 1], sum: 0 });
-  }
-  const trendMap = new Map(trendMonths.map((m) => [m.key, m]));
-  for (const t of state.transactions) {
-    if (t.type !== 'expense') continue;
-    const item = trendMap.get(t.date.slice(0, 7));
-    if (item) item.sum += t.amount;
-  }
-  const maxTrend = Math.max(1, ...trendMonths.map((m) => m.sum));
+  const maxTrend = Math.max(1, ...ctx.bars.map((b) => b.sum));
 
   // Category breakdown for donut
-  const modeTxs = monthTxs.filter((t) => t.type === state.overviewMode);
+  const modeTxs = periodTxs.filter((t) => t.type === state.overviewMode);
   const modeTotal = modeTxs.reduce((acc, t) => acc + t.amount, 0);
   const catMap = getCategoryMap();
   const byCat = new Map();
@@ -386,22 +790,37 @@ function renderOverview() {
   const centerValue = activeItem ? formatMoney(activeItem.sum) : formatMoney(modeTotal);
   const centerPct = activeItem ? `${activeItem.pct.toFixed(1)}%` : '';
 
-  // Recent 5 transactions of selected month
-  const recentTxs = [...monthTxs]
+  const recentTxs = [...periodTxs]
     .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || 0) - (a.createdAt || 0))
     .slice(0, 5);
 
+  const syncDotHtml = isGitHubConfigured()
+    ? `<span class="sync-dot ${state.syncStatus}" data-sync-dot title="Синхронизация с GitHub"></span>`
+    : '';
+
   mainEl.innerHTML = `
     <div class="stack">
+      <div class="overview-topbar">
+        <div class="mobile-brand-wrap">
+          <span class="mobile-brand">ADMA</span>
+          ${syncDotHtml}
+        </div>
+        <div class="period-pills" role="tablist" aria-label="Период обзора">
+          <button type="button" class="period-pill ${state.periodMode === 'day' ? 'active' : ''}" data-period-mode="day">День</button>
+          <button type="button" class="period-pill ${state.periodMode === 'week' ? 'active' : ''}" data-period-mode="week">Неделя</button>
+          <button type="button" class="period-pill ${state.periodMode === 'month' ? 'active' : ''}" data-period-mode="month">Месяц</button>
+        </div>
+      </div>
+
       <div class="month-bar">
-        <button type="button" class="month-nav-btn" id="prevMonthBtn" aria-label="Предыдущий месяц">
+        <button type="button" class="month-nav-btn" id="prevPeriodBtn" aria-label="Предыдущий период">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
         <div class="month-label-wrap">
-          <span class="month-label">${escapeHtml(formatMonthLabel(state.monthKey))}</span>
-          ${isCurrentMonth ? '' : '<button type="button" class="today-chip" id="resetMonthBtn">Текущий</button>'}
+          <span class="month-label">${escapeHtml(ctx.label)}</span>
+          ${ctx.isCurrent ? '' : `<button type="button" class="today-chip" id="resetPeriodBtn">${ctx.resetLabel}</button>`}
         </div>
-        <button type="button" class="month-nav-btn" id="nextMonthBtn" aria-label="Следующий месяц">
+        <button type="button" class="month-nav-btn" id="nextPeriodBtn" aria-label="Следующий период">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
         </button>
       </div>
@@ -409,7 +828,7 @@ function renderOverview() {
       <section class="card hero-card">
         <div class="hero-top">
           <div>
-            <div class="muted-label">Расходы за месяц</div>
+            <div class="tech-label">${ctx.heroTitle}</div>
             <div class="hero-amount num">${formatMoney(expense)}</div>
           </div>
           ${deltaHtml}
@@ -427,22 +846,21 @@ function renderOverview() {
       </section>
 
       <section class="card">
-        <div class="section-header" style="margin-bottom:4px;">
-          <h2 class="section-title">Динамика расходов</h2>
-          <span class="muted-label" style="margin:0;">6 месяцев</span>
+        <div class="section-header" style="margin-bottom:10px;">
+          <h2 class="section-title">${ctx.trendTitle}</h2>
+          <span class="muted-label" style="margin:0;">${ctx.trendSub}</span>
         </div>
-        <div class="trend-bars">
-          ${trendMonths
-            .map((m) => {
-              const heightPct = m.sum > 0 ? Math.max(8, Math.round((m.sum / maxTrend) * 100)) : 4;
-              const isActive = m.key === state.monthKey;
+        <div class="trend-bars" style="--trend-cols:${ctx.trendCols}">
+          ${ctx.bars
+            .map((b) => {
+              const heightPct = b.sum > 0 ? Math.max(8, Math.round((b.sum / maxTrend) * 100)) : 4;
               return `
-                <button type="button" class="trend-col ${isActive ? 'active' : ''}" data-trend-month="${m.key}" aria-label="${escapeHtml(formatMonthLabel(m.key))}: ${formatMoney(m.sum)}">
-                  <span class="trend-bar-amt num">${formatCompactAmount(m.sum)}</span>
+                <button type="button" class="trend-col ${b.isActive ? 'active' : ''}" data-trend-key="${escapeHtml(b.key)}" title="${escapeHtml(b.title)}: ${formatMoney(b.sum)}" aria-label="${escapeHtml(b.title)}: ${formatMoney(b.sum)}">
+                  <span class="trend-bar-amt num">${formatCompactAmount(b.sum)}</span>
                   <div class="trend-bar-track">
                     <div class="trend-bar-fill" style="height:${heightPct}%"></div>
                   </div>
-                  <span class="trend-bar-lbl">${m.label}</span>
+                  <span class="trend-bar-lbl">${escapeHtml(b.label)}</span>
                 </button>
               `;
             })
@@ -462,8 +880,8 @@ function renderOverview() {
         ${
           breakdown.length === 0
             ? `<div class="empty-state">
-                 <div class="empty-state-title">Нет операций за ${escapeHtml(formatMonthLabel(state.monthKey).toLowerCase())}</div>
-                 <div>Нажмите «+», чтобы добавить первую запись.</div>
+                 <div class="empty-state-title">Нет операций за период</div>
+                 <div>Нажмите «+», чтобы добавить запись.</div>
                </div>`
             : `<div class="overview-grid">
                  <div class="donut-wrap">
@@ -550,24 +968,31 @@ function renderOverview() {
     </div>
   `;
 
-  document.getElementById('prevMonthBtn')?.addEventListener('click', () => {
-    state.monthKey = shiftMonth(state.monthKey, -1);
-    state.selectedDonutCatId = null;
-    renderOverview();
-  });
-  document.getElementById('nextMonthBtn')?.addEventListener('click', () => {
-    state.monthKey = shiftMonth(state.monthKey, 1);
-    state.selectedDonutCatId = null;
-    renderOverview();
-  });
-  document.getElementById('resetMonthBtn')?.addEventListener('click', () => {
-    state.monthKey = currentMonthKey();
-    state.selectedDonutCatId = null;
-    renderOverview();
-  });
-  mainEl.querySelectorAll('[data-trend-month]').forEach((btn) => {
+  mainEl.querySelectorAll('[data-period-mode]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      state.monthKey = btn.dataset.trendMonth;
+      state.periodMode = btn.dataset.periodMode;
+      state.selectedDonutCatId = null;
+      renderOverview();
+    });
+  });
+  document.getElementById('prevPeriodBtn')?.addEventListener('click', () => {
+    ctx.step(-1);
+    state.selectedDonutCatId = null;
+    renderOverview();
+  });
+  document.getElementById('nextPeriodBtn')?.addEventListener('click', () => {
+    ctx.step(1);
+    state.selectedDonutCatId = null;
+    renderOverview();
+  });
+  document.getElementById('resetPeriodBtn')?.addEventListener('click', () => {
+    ctx.reset();
+    state.selectedDonutCatId = null;
+    renderOverview();
+  });
+  mainEl.querySelectorAll('[data-trend-key]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      ctx.selectBar(btn.dataset.trendKey);
       state.selectedDonutCatId = null;
       renderOverview();
     });
@@ -890,13 +1315,18 @@ function renderCategoriesTab() {
 function renderSettingsTab() {
   const txCount = state.transactions.length;
   const hasDemo = state.transactions.some((t) => t.isDemo);
-  const lastBackup = state.settings.lastBackupAt;
+  const ghConnected = isGitHubConfigured();
+  const lastBackup = state.settings.ghLastSyncAt || state.settings.lastBackupAt;
   const daysSinceBackup = lastBackup ? Math.floor((Date.now() - lastBackup) / 86400000) : null;
-  const needsBackup = txCount > 0 && (daysSinceBackup === null || daysSinceBackup >= 30);
+  const needsBackup = !ghConnected && txCount > 0 && (daysSinceBackup === null || daysSinceBackup >= 30);
 
   const backupLabel = lastBackup
     ? new Date(lastBackup).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
     : 'ещё не создавался';
+
+  const ghSyncLabel = state.settings.ghLastSyncAt
+    ? new Date(state.settings.ghLastSyncAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : 'ожидает синхронизации';
 
   mainEl.innerHTML = `
     <div class="stack">
@@ -906,11 +1336,39 @@ function renderSettingsTab() {
       ${
         needsBackup
           ? `<div class="alert-banner">
-               <span>${daysSinceBackup === null ? 'Рекомендуем сделать первый JSON-бэкап данных.' : `Бэкап не делался уже ${daysSinceBackup} дн. Сохраните копию.`}</span>
+               <span>${daysSinceBackup === null ? 'Подключите GitHub Sync ниже или сделайте JSON-бэкап.' : `Бэкап не делался уже ${daysSinceBackup} дн. Сохраните копию.`}</span>
                <button type="button" class="btn btn-primary btn-sm" id="quickBackupBtn">Сохранить бэкап</button>
              </div>`
           : ''
       }
+
+      <section class="card settings-group">
+        <div class="section-header" style="margin-bottom:0;">
+          <h2 class="section-title">Автосинхронизация с GitHub</h2>
+          <span class="sync-dot ${ghConnected ? state.syncStatus : ''}" data-sync-dot></span>
+        </div>
+        <div class="setting-desc">
+          ${
+            ghConnected
+              ? `Подключено к <strong>${escapeHtml(state.settings.ghRepo)}</strong> · последний обмен: ${escapeHtml(ghSyncLabel)}${state.syncError ? ` · ошибка: ${escapeHtml(state.syncError)}` : ''}`
+              : 'Каждая новая операция автоматически сохраняется в приватный репозиторий GitHub — ручные бэкапы больше не нужны.'
+          }
+        </div>
+        <div class="stack" style="gap:8px;">
+          <input type="text" class="input" id="ghRepoInput" placeholder="owner/repo" value="${escapeHtml(state.settings.ghRepo || 'ilyamaksimov86-ai/adma-finance-data')}">
+          <input type="password" class="input" id="ghTokenInput" placeholder="${ghConnected ? 'Токен сохранён (вставьте новый, чтобы заменить)' : 'Вставьте GitHub Fine-grained token (github_pat_...)'}" value="" autocomplete="off">
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary" id="saveGhSyncBtn">${ghConnected ? 'Сохранить и синхр.' : 'Подключить GitHub'}</button>
+          ${
+            ghConnected
+              ? `<button type="button" class="btn btn-secondary" id="syncNowBtn">Выгрузить сейчас</button>
+                 <button type="button" class="btn btn-secondary" id="pullGhBtn">Загрузить из GitHub</button>
+                 <button type="button" class="btn btn-danger" id="disconnectGhBtn">Отключить</button>`
+              : ''
+          }
+        </div>
+      </section>
 
       <section class="card settings-group">
         <h2 class="section-title">Внешний вид и валюта</h2>
@@ -990,6 +1448,44 @@ function renderSettingsTab() {
     });
   });
 
+  document.getElementById('saveGhSyncBtn')?.addEventListener('click', async () => {
+    const repo = (document.getElementById('ghRepoInput')?.value || '').trim();
+    const newToken = (document.getElementById('ghTokenInput')?.value || '').trim();
+    const effectiveToken = newToken || (state.settings.ghToken || '').trim();
+    if (!repo || !repo.includes('/')) {
+      showToast('Укажите репозиторий в формате owner/repo');
+      return;
+    }
+    if (!effectiveToken) {
+      showToast('Вставьте GitHub token');
+      return;
+    }
+    await setSetting('ghRepo', repo);
+    await setSetting('ghToken', effectiveToken);
+    state.settings.ghRepo = repo;
+    state.settings.ghToken = effectiveToken;
+    showToast('Подключаю GitHub...');
+    await pullFromGitHub({ silent: false });
+    renderSettingsTab();
+  });
+
+  document.getElementById('syncNowBtn')?.addEventListener('click', async () => {
+    await pushToGitHub({ silent: false });
+  });
+
+  document.getElementById('pullGhBtn')?.addEventListener('click', async () => {
+    await pullFromGitHub({ force: true, silent: false });
+  });
+
+  document.getElementById('disconnectGhBtn')?.addEventListener('click', async () => {
+    await setSetting('ghToken', '');
+    state.settings.ghToken = '';
+    state.syncStatus = 'idle';
+    state.syncError = '';
+    renderSettingsTab();
+    showToast('GitHub Sync отключён');
+  });
+
   document.getElementById('quickBackupBtn')?.addEventListener('click', handleExportJson);
   document.getElementById('exportJsonBtn')?.addEventListener('click', handleExportJson);
   document.getElementById('exportCsvBtn')?.addEventListener('click', handleExportCsv);
@@ -1025,6 +1521,7 @@ function renderSettingsTab() {
   document.getElementById('clearDemoBtn')?.addEventListener('click', async () => {
     const removed = await clearDemoData();
     await reloadData();
+    scheduleAutoSync();
     renderSettingsTab();
     showToast(`Удалено демо-операций: ${removed}`);
   });
@@ -1252,7 +1749,9 @@ async function handleSaveTransaction() {
     createdAt: f.createdAt || Date.now(),
   });
   await reloadData();
+  state.selectedDate = saved.date;
   state.monthKey = saved.date.slice(0, 7);
+  scheduleAutoSync();
   closeSheet();
   renderMain();
   showToast(f.id ? 'Операция обновлена' : 'Операция добавлена');
@@ -1265,6 +1764,7 @@ async function handleDeleteTransaction() {
   if (!backup) return;
   await deleteTransaction(backup.id);
   await reloadData();
+  scheduleAutoSync();
   closeSheet();
   renderMain();
   showToast('Операция удалена', {
@@ -1273,6 +1773,7 @@ async function handleDeleteTransaction() {
     onAction: async () => {
       await saveTransaction(backup);
       await reloadData();
+      scheduleAutoSync();
       renderMain();
       showToast('Операция восстановлена');
     },
@@ -1374,6 +1875,7 @@ function renderCategorySheet() {
     }
     await saveCategory({ ...c, name });
     await reloadData();
+    scheduleAutoSync();
     closeSheet();
     renderMain();
     showToast(c.id ? 'Категория обновлена' : 'Категория создана');
@@ -1419,6 +1921,7 @@ function openDeleteCategorySheet(cat) {
     const targetId = document.getElementById('reassignCatSelect')?.value || defaultTarget?.id || null;
     await deleteCategoryAndReassign(cat.id, targetId);
     await reloadData();
+    scheduleAutoSync();
     closeSheet();
     renderMain();
     showToast(`Категория «${cat.name}» удалена`);
@@ -1646,8 +2149,12 @@ async function executeCsvImport(rows, newCats, skipDuplicates) {
   await reloadData();
   if (toAdd.length > 0) {
     const latestDate = toAdd.map((t) => t.date).sort().pop();
-    if (latestDate) state.monthKey = latestDate.slice(0, 7);
+    if (latestDate) {
+      state.selectedDate = latestDate;
+      state.monthKey = latestDate.slice(0, 7);
+    }
   }
+  scheduleAutoSync();
   closeSheet();
   renderMain();
   showToast(`Импортировано: ${toAdd.length}${skipped ? `, пропущено дублей: ${skipped}` : ''}`);
@@ -1841,7 +2348,10 @@ async function bootstrap() {
   document.getElementById('desktopAddBtn')?.addEventListener('click', () => openTransactionSheet());
   document.getElementById('mobileAddBtn')?.addEventListener('click', () => openTransactionSheet());
 
-  window.addEventListener('online', updateOnlineStatus);
+  window.addEventListener('online', () => {
+    updateOnlineStatus();
+    if (isGitHubConfigured()) pushToGitHub({ silent: true });
+  });
   window.addEventListener('offline', updateOnlineStatus);
   updateOnlineStatus();
 
@@ -1852,6 +2362,9 @@ async function bootstrap() {
   await initDatabase();
   await reloadData();
   setTab('overview');
+  if (isGitHubConfigured() && navigator.onLine) {
+    pullFromGitHub({ silent: true });
+  }
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js', { scope: './' }).catch((err) => {
