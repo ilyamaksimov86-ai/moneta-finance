@@ -1,0 +1,1605 @@
+import {
+  initDatabase,
+  getAllTransactions,
+  saveTransaction,
+  bulkSaveTransactions,
+  deleteTransaction,
+  getAllCategories,
+  saveCategory,
+  deleteCategoryAndReassign,
+  getSettings,
+  setSetting,
+  clearDemoData,
+  clearAllData,
+  exportFullBackup,
+  importFullBackup,
+  generateId,
+} from './db.js';
+
+// 24 minimalist SVG icons
+const ICONS = {
+  cart: '<circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M3 4h2l2.4 11.2a1.5 1.5 0 0 0 1.5 1.2h9.3a1.5 1.5 0 0 0 1.4-1.1L21 8H6"/>',
+  coffee: '<path d="M17 8h1a3 3 0 0 1 0 6h-1"/><path d="M4 8h13v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V8z"/><path d="M7 4v2M11 4v2"/>',
+  car: '<path d="M5 11l1.5-4.5A2 2 0 0 1 8.4 5h7.2a2 2 0 0 1 1.9 1.5L19 11"/><rect x="3" y="11" width="18" height="6" rx="2"/><circle cx="7" cy="17" r="1.5"/><circle cx="17" cy="17" r="1.5"/>',
+  home: '<path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/><path d="M9.5 20v-6h5v6"/>',
+  heart: '<path d="M12 20s-7-4.5-9-8.5A5.2 5.2 0 0 1 12 6.5a5.2 5.2 0 0 1 9 5c-2 4-9 8.5-9 8.5z"/>',
+  bag: '<path d="M6 8h12l-1 12H7L6 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>',
+  repeat: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>',
+  tag: '<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="8" cy="8" r="1.2"/>',
+  briefcase: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  trend: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+  chart: '<path d="M4 19h16"/><rect x="6" y="11" width="3" height="8" rx="1"/><rect x="11" y="7" width="3" height="12" rx="1"/><rect x="16" y="4" width="3" height="15" rx="1"/>',
+  gift: '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M5 12v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8"/><path d="M12 8H8.5a2 2 0 1 1 0-4C11 4 12 8 12 8zm0 0h3.5a2 2 0 1 0 0-4C13 4 12 8 12 8z"/>',
+  wallet: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12.5h5"/><circle cx="16.5" cy="12.5" r="1"/>',
+  utensils: '<path d="M6 3v7a2 2 0 0 0 4 0V3M8 3v18"/><path d="M16 3v18M16 3a3 3 0 0 1 3 3v5h-3"/>',
+  plane: '<path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>',
+  dumbbell: '<path d="M6 7v10M18 7v10M3 9v6M21 9v6M6 12h12"/>',
+  book: '<path d="M4 5a2 2 0 0 1 2-2h13v17H6a2 2 0 0 1-2-2V5z"/><path d="M4 17a2 2 0 0 1 2-2h13"/>',
+  music: '<path d="M9 18V6l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>',
+  phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
+  bolt: '<path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/>',
+  shirt: '<path d="M16 4l4 3-2 4-2-1v10H8V10l-2 1-2-4 4-3a4 4 0 0 0 8 0z"/>',
+  wine: '<path d="M8 3h8l-1 6a4 4 0 0 1-6 0L8 3z"/><path d="M12 13v7M8 20h8"/>',
+  credit: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>',
+  users: '<circle cx="9" cy="8" r="3"/><path d="M3 19a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.5"/><path d="M16 19a5 5 0 0 1 5-4"/>',
+};
+
+const NAV_ICONS = {
+  overview: '<path d="M12 3a9 9 0 1 0 9 9h-9V3z"/><path d="M15.5 3.7A9 9 0 0 1 20.3 8.5H15.5V3.7z"/>',
+  transactions: '<path d="M4 7h16M4 12h16M4 17h10"/>',
+  categories: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/>',
+};
+
+const PALETTE = [
+  '#10B981', '#0EA5E9', '#3B82F6', '#6366F1',
+  '#8B5CF6', '#EC4899', '#EF4444', '#F97316',
+  '#F59E0B', '#84CC16', '#06B6D4', '#64748B',
+];
+
+const MONTHS_RU = [
+  'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
+];
+
+const MONTHS_GEN_RU = [
+  'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+  'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+];
+
+const state = {
+  tab: 'overview',
+  monthKey: currentMonthKey(),
+  overviewMode: 'expense',
+  selectedDonutCatId: null,
+  transactions: [],
+  categories: [],
+  settings: { currency: '₽', theme: 'system', demoCleared: false, lastBackupAt: null },
+  filters: {
+    search: '',
+    type: 'all',
+    categoryId: 'all',
+    monthMode: 'selected', // 'selected' | 'all'
+  },
+  activeSheet: null,
+  txForm: null,
+  catForm: null,
+  csvPreview: null,
+  pendingUndo: null,
+};
+
+const mainEl = document.getElementById('mainContent');
+const sheetBackdrop = document.getElementById('sheetBackdrop');
+const sheetContainer = document.getElementById('sheetContainer');
+const toastHost = document.getElementById('toastHost');
+const offlineBadge = document.getElementById('offlineBadge');
+const themeColorMeta = document.getElementById('themeColorMeta');
+
+function svgIcon(name, size = 18) {
+  const path = ICONS[name] || ICONS.tag;
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+}
+
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function currentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function todayISO(offsetDays = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function shiftMonth(monthKey, delta) {
+  const [y, m] = monthKey.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function formatMonthLabel(monthKey) {
+  const [y, m] = monthKey.split('-').map(Number);
+  return `${MONTHS_RU[m - 1]} ${y}`;
+}
+
+function formatDayHeader(dateStr) {
+  if (dateStr === todayISO(0)) return 'Сегодня';
+  if (dateStr === todayISO(-1)) return 'Вчера';
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const thisYear = new Date().getFullYear();
+  return y === thisYear ? `${d} ${MONTHS_GEN_RU[m - 1]}` : `${d} ${MONTHS_GEN_RU[m - 1]} ${y}`;
+}
+
+function formatMoney(amount, { signed = false, type = null } = {}) {
+  const cur = state.settings.currency || '₽';
+  const abs = Math.abs(Number(amount) || 0);
+  const hasDecimals = Math.round(abs * 100) % 100 !== 0;
+  const formatted = abs.toLocaleString('ru-RU', {
+    minimumFractionDigits: hasDecimals ? 2 : 0,
+    maximumFractionDigits: 2,
+  });
+  let prefix = '';
+  if (type === 'income') prefix = '+';
+  else if (type === 'expense') prefix = '−';
+  else if (signed) prefix = amount > 0 ? '+' : amount < 0 ? '−' : '';
+  return `${prefix}${formatted}\u00A0${cur}`;
+}
+
+function getCategoryMap() {
+  const map = new Map();
+  for (const c of state.categories) map.set(c.id, c);
+  return map;
+}
+
+function applyTheme() {
+  const pref = state.settings.theme || 'system';
+  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const effective = pref === 'system' ? (prefersDark ? 'dark' : 'light') : pref;
+  document.documentElement.setAttribute('data-theme', effective);
+  if (themeColorMeta) {
+    themeColorMeta.setAttribute('content', effective === 'dark' ? '#0b1120' : '#f8fafc');
+  }
+}
+
+function updateOnlineStatus() {
+  if (offlineBadge) offlineBadge.hidden = navigator.onLine;
+}
+
+function showToast(message, { actionLabel = null, onAction = null, duration = 3500 } = {}) {
+  toastHost.innerHTML = '';
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = `<span>${escapeHtml(message)}</span>`;
+  if (actionLabel && onAction) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action';
+    btn.textContent = actionLabel;
+    btn.addEventListener('click', () => {
+      el.remove();
+      onAction();
+    });
+    el.appendChild(btn);
+  }
+  toastHost.appendChild(el);
+  setTimeout(() => {
+    if (el.isConnected) el.remove();
+  }, duration);
+}
+
+async function reloadData() {
+  const [transactions, categories, settings] = await Promise.all([
+    getAllTransactions(),
+    getAllCategories(),
+    getSettings(),
+  ]);
+  state.transactions = transactions;
+  state.categories = categories;
+  state.settings = settings;
+  applyTheme();
+}
+
+function setTab(tab) {
+  state.tab = tab;
+  document.querySelectorAll('[data-tab]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+  renderMain();
+}
+
+function renderMain() {
+  if (state.tab === 'overview') renderOverview();
+  else if (state.tab === 'transactions') renderTransactionsTab();
+  else if (state.tab === 'categories') renderCategoriesTab();
+  else if (state.tab === 'settings') renderSettingsTab();
+}
+
+// ============================================================
+// OVERVIEW TAB
+// ============================================================
+function renderOverview() {
+  const monthTxs = state.transactions.filter((t) => t.date.startsWith(state.monthKey));
+  let income = 0;
+  let expense = 0;
+  for (const t of monthTxs) {
+    if (t.type === 'income') income += t.amount;
+    else expense += t.amount;
+  }
+  const balance = income - expense;
+  const savingsRate = income > 0 ? Math.round(((income - expense) / income) * 100) : null;
+  const isCurrentMonth = state.monthKey === currentMonthKey();
+
+  const modeTxs = monthTxs.filter((t) => t.type === state.overviewMode);
+  const modeTotal = modeTxs.reduce((acc, t) => acc + t.amount, 0);
+  const catMap = getCategoryMap();
+  const byCat = new Map();
+  for (const t of modeTxs) {
+    byCat.set(t.categoryId, (byCat.get(t.categoryId) || 0) + t.amount);
+  }
+  const breakdown = [...byCat.entries()]
+    .map(([categoryId, sum]) => {
+      const cat = catMap.get(categoryId) || { id: categoryId, name: 'Без категории', icon: 'tag', color: '#64748B' };
+      const pct = modeTotal > 0 ? (sum / modeTotal) * 100 : 0;
+      return { cat, sum, pct };
+    })
+    .sort((a, b) => b.sum - a.sum);
+
+  if (state.selectedDonutCatId && !breakdown.some((b) => b.cat.id === state.selectedDonutCatId)) {
+    state.selectedDonutCatId = null;
+  }
+  const activeItem = breakdown.find((b) => b.cat.id === state.selectedDonutCatId) || null;
+
+  // Build SVG donut segments
+  const radius = 82;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  const segmentsSvg = breakdown.length
+    ? breakdown
+        .map((item) => {
+          const dash = (item.pct / 100) * circumference;
+          const gap = breakdown.length > 1 ? 2.5 : 0;
+          const segLen = Math.max(0.5, dash - gap);
+          const isSelected = activeItem && activeItem.cat.id === item.cat.id;
+          const opacity = activeItem && !isSelected ? 0.35 : 1;
+          const svg = `<circle
+            class="donut-segment ${isSelected ? 'active' : ''}"
+            data-donut-cat="${escapeHtml(item.cat.id)}"
+            cx="105" cy="105" r="${radius}"
+            fill="none"
+            stroke="${escapeHtml(item.cat.color)}"
+            stroke-width="${isSelected ? 27 : 22}"
+            stroke-dasharray="${segLen.toFixed(2)} ${(circumference - segLen).toFixed(2)}"
+            stroke-dashoffset="${(-offset).toFixed(2)}"
+            transform="rotate(-90 105 105)"
+            opacity="${opacity}"
+          />`;
+          offset += dash;
+          return svg;
+        })
+        .join('')
+    : `<circle cx="105" cy="105" r="${radius}" fill="none" stroke="var(--surface-2)" stroke-width="22"/>`;
+
+  const centerLabel = activeItem
+    ? activeItem.cat.name
+    : state.overviewMode === 'expense'
+      ? 'Всего расходов'
+      : 'Всего доходов';
+  const centerValue = activeItem ? formatMoney(activeItem.sum) : formatMoney(modeTotal);
+  const centerPct = activeItem ? `${activeItem.pct.toFixed(1)}%` : '';
+
+  const savingsClass = savingsRate === null ? '' : savingsRate >= 0 ? 'positive' : 'negative';
+  const savingsText = savingsRate === null ? 'Норма сбережений: —' : `Сбережения: ${savingsRate}%`;
+
+  mainEl.innerHTML = `
+    <div class="stack">
+      <div class="month-bar">
+        <button type="button" class="month-nav-btn" id="prevMonthBtn" aria-label="Предыдущий месяц">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div class="month-label-wrap">
+          <span class="month-label">${escapeHtml(formatMonthLabel(state.monthKey))}</span>
+          ${isCurrentMonth ? '' : '<button type="button" class="today-chip" id="resetMonthBtn">Текущий</button>'}
+        </div>
+        <button type="button" class="month-nav-btn" id="nextMonthBtn" aria-label="Следующий месяц">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+
+      <section class="card summary-hero">
+        <div class="balance-row">
+          <div>
+            <div class="muted-label">Баланс за месяц</div>
+            <div class="balance-value num">${formatMoney(balance, { signed: true })}</div>
+          </div>
+          <span class="savings-pill num ${savingsClass}">${savingsText}</span>
+        </div>
+        <div class="metrics-2">
+          <div class="metric-box">
+            <div class="muted-label">Доходы</div>
+            <div class="metric-value num text-income">${formatMoney(income, { type: income > 0 ? 'income' : null })}</div>
+          </div>
+          <div class="metric-box">
+            <div class="muted-label">Расходы</div>
+            <div class="metric-value num text-expense">${formatMoney(expense, { type: expense > 0 ? 'expense' : null })}</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-header">
+          <h2 class="section-title">Структура</h2>
+          <div class="segmented">
+            <button type="button" class="seg-btn ${state.overviewMode === 'expense' ? 'active' : ''}" data-overview-mode="expense">Расходы</button>
+            <button type="button" class="seg-btn ${state.overviewMode === 'income' ? 'active' : ''}" data-overview-mode="income">Доходы</button>
+          </div>
+        </div>
+
+        ${
+          breakdown.length === 0
+            ? `<div class="empty-state">
+                 <div class="empty-state-title">Нет операций за ${escapeHtml(formatMonthLabel(state.monthKey).toLowerCase())}</div>
+                 <div>Нажмите «+», чтобы добавить первую запись.</div>
+               </div>`
+            : `<div class="overview-grid">
+                 <div class="donut-wrap">
+                   <svg class="donut-svg" viewBox="0 0 210 210" role="img" aria-label="Диаграмма по категориям">
+                     ${segmentsSvg}
+                   </svg>
+                   <div class="donut-center">
+                     <div class="donut-center-label">${escapeHtml(centerLabel)}</div>
+                     <div class="donut-center-value num">${centerValue}</div>
+                     ${centerPct ? `<div class="donut-center-pct num">${centerPct}</div>` : ''}
+                   </div>
+                   ${
+                     activeItem
+                       ? `<button type="button" class="btn btn-secondary btn-sm" id="filterBySelectedCatBtn" style="margin-top:8px;">
+                            Операции: ${escapeHtml(activeItem.cat.name)}
+                          </button>`
+                       : ''
+                   }
+                 </div>
+
+                 <div class="cat-breakdown-list">
+                   ${breakdown
+                     .map(
+                       (item) => `
+                     <button type="button" class="cat-breakdown-row ${activeItem && activeItem.cat.id === item.cat.id ? 'active' : ''}" data-breakdown-cat="${escapeHtml(item.cat.id)}">
+                       <div class="cat-row-top">
+                         <div class="cat-row-left">
+                           <span class="cat-badge" style="background:${escapeHtml(item.cat.color)}20;color:${escapeHtml(item.cat.color)}">
+                             ${svgIcon(item.cat.icon, 18)}
+                           </span>
+                           <span class="cat-row-name">${escapeHtml(item.cat.name)}</span>
+                         </div>
+                         <div class="cat-row-right">
+                           <span class="cat-row-amount num">${formatMoney(item.sum)}</span>
+                           <span class="cat-row-pct num">${item.pct.toFixed(0)}%</span>
+                         </div>
+                       </div>
+                       <div class="progress-track">
+                         <div class="progress-fill" style="width:${Math.max(2, item.pct).toFixed(1)}%;background:${escapeHtml(item.cat.color)}"></div>
+                       </div>
+                     </button>
+                   `
+                     )
+                     .join('')}
+                 </div>
+               </div>`
+        }
+      </section>
+    </div>
+  `;
+
+  document.getElementById('prevMonthBtn')?.addEventListener('click', () => {
+    state.monthKey = shiftMonth(state.monthKey, -1);
+    state.selectedDonutCatId = null;
+    renderOverview();
+  });
+  document.getElementById('nextMonthBtn')?.addEventListener('click', () => {
+    state.monthKey = shiftMonth(state.monthKey, 1);
+    state.selectedDonutCatId = null;
+    renderOverview();
+  });
+  document.getElementById('resetMonthBtn')?.addEventListener('click', () => {
+    state.monthKey = currentMonthKey();
+    state.selectedDonutCatId = null;
+    renderOverview();
+  });
+  mainEl.querySelectorAll('[data-overview-mode]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.overviewMode = btn.dataset.overviewMode;
+      state.selectedDonutCatId = null;
+      renderOverview();
+    });
+  });
+  mainEl.querySelectorAll('[data-donut-cat]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const id = el.dataset.donutCat;
+      state.selectedDonutCatId = state.selectedDonutCatId === id ? null : id;
+      renderOverview();
+    });
+  });
+  mainEl.querySelectorAll('[data-breakdown-cat]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const id = el.dataset.breakdownCat;
+      if (state.selectedDonutCatId === id) {
+        jumpToFilteredTransactions(id);
+      } else {
+        state.selectedDonutCatId = id;
+        renderOverview();
+      }
+    });
+  });
+  document.getElementById('filterBySelectedCatBtn')?.addEventListener('click', () => {
+    if (state.selectedDonutCatId) jumpToFilteredTransactions(state.selectedDonutCatId);
+  });
+}
+
+function jumpToFilteredTransactions(categoryId) {
+  state.filters.categoryId = categoryId;
+  state.filters.type = state.overviewMode;
+  state.filters.monthMode = 'selected';
+  setTab('transactions');
+}
+
+// ============================================================
+// TRANSACTIONS TAB
+// ============================================================
+function renderTransactionsTab() {
+  const catOptions = state.categories
+    .filter((c) => state.filters.type === 'all' || c.type === state.filters.type)
+    .map((c) => `<option value="${escapeHtml(c.id)}" ${state.filters.categoryId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`)
+    .join('');
+
+  mainEl.innerHTML = `
+    <div class="stack">
+      <div class="month-bar">
+        <button type="button" class="month-nav-btn" id="txPrevMonth" aria-label="Предыдущий месяц">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div class="month-label-wrap">
+          <span class="month-label">${state.filters.monthMode === 'all' ? 'Все месяцы' : escapeHtml(formatMonthLabel(state.monthKey))}</span>
+          <button type="button" class="today-chip" id="toggleMonthScopeBtn">
+            ${state.filters.monthMode === 'all' ? 'За месяц' : 'Все даты'}
+          </button>
+        </div>
+        <button type="button" class="month-nav-btn" id="txNextMonth" aria-label="Следующий месяц">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+
+      <div class="filters-bar">
+        <div class="search-wrap">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input type="search" class="input search-input" id="txSearchInput" placeholder="Поиск по комментарию, категории или сумме..." value="${escapeHtml(state.filters.search)}">
+        </div>
+        <div class="filter-controls">
+          <div class="segmented">
+            <button type="button" class="seg-btn ${state.filters.type === 'all' ? 'active' : ''}" data-filter-type="all">Все</button>
+            <button type="button" class="seg-btn ${state.filters.type === 'expense' ? 'active' : ''}" data-filter-type="expense">Расходы</button>
+            <button type="button" class="seg-btn ${state.filters.type === 'income' ? 'active' : ''}" data-filter-type="income">Доходы</button>
+          </div>
+          <select class="select" id="txCatFilter" aria-label="Фильтр по категории">
+            <option value="all">Все категории</option>
+            ${catOptions}
+          </select>
+        </div>
+      </div>
+
+      <div id="txFeedContainer" class="stack"></div>
+    </div>
+  `;
+
+  document.getElementById('txPrevMonth')?.addEventListener('click', () => {
+    state.filters.monthMode = 'selected';
+    state.monthKey = shiftMonth(state.monthKey, -1);
+    renderTransactionsTab();
+  });
+  document.getElementById('txNextMonth')?.addEventListener('click', () => {
+    state.filters.monthMode = 'selected';
+    state.monthKey = shiftMonth(state.monthKey, 1);
+    renderTransactionsTab();
+  });
+  document.getElementById('toggleMonthScopeBtn')?.addEventListener('click', () => {
+    state.filters.monthMode = state.filters.monthMode === 'all' ? 'selected' : 'all';
+    renderTransactionsTab();
+  });
+  document.getElementById('txSearchInput')?.addEventListener('input', (e) => {
+    state.filters.search = e.target.value;
+    renderTransactionsFeedOnly();
+  });
+  mainEl.querySelectorAll('[data-filter-type]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.filters.type = btn.dataset.filterType;
+      state.filters.categoryId = 'all';
+      renderTransactionsTab();
+    });
+  });
+  document.getElementById('txCatFilter')?.addEventListener('change', (e) => {
+    state.filters.categoryId = e.target.value;
+    renderTransactionsFeedOnly();
+  });
+
+  renderTransactionsFeedOnly();
+}
+
+function renderTransactionsFeedOnly() {
+  const container = document.getElementById('txFeedContainer');
+  if (!container) return;
+
+  const catMap = getCategoryMap();
+  const q = state.filters.search.trim().toLowerCase();
+
+  const filtered = state.transactions.filter((t) => {
+    if (state.filters.monthMode === 'selected' && !t.date.startsWith(state.monthKey)) return false;
+    if (state.filters.type !== 'all' && t.type !== state.filters.type) return false;
+    if (state.filters.categoryId !== 'all' && t.categoryId !== state.filters.categoryId) return false;
+    if (q) {
+      const catName = (catMap.get(t.categoryId)?.name || '').toLowerCase();
+      const comment = (t.comment || '').toLowerCase();
+      const amt = String(t.amount);
+      if (!catName.includes(q) && !comment.includes(q) && !amt.includes(q)) return false;
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    container.innerHTML = `
+      <div class="card empty-state">
+        <div class="empty-state-title">Операции не найдены</div>
+        <div>Попробуйте изменить фильтры или добавить новую операцию.</div>
+      </div>
+    `;
+    return;
+  }
+
+  const byDay = new Map();
+  for (const t of filtered) {
+    if (!byDay.has(t.date)) byDay.set(t.date, []);
+    byDay.get(t.date).push(t);
+  }
+
+  container.innerHTML = [...byDay.entries()]
+    .map(([dateStr, items]) => {
+      const dayNet = items.reduce((acc, t) => acc + (t.type === 'income' ? t.amount : -t.amount), 0);
+      return `
+        <div class="day-group">
+          <div class="day-header">
+            <span>${escapeHtml(formatDayHeader(dateStr))}</span>
+            <span class="num">${formatMoney(dayNet, { signed: true })}</span>
+          </div>
+          <div class="tx-list">
+            ${items
+              .map((t) => {
+                const cat = catMap.get(t.categoryId) || { name: 'Без категории', icon: 'tag', color: '#64748B' };
+                return `
+                  <button type="button" class="tx-row" data-edit-tx="${escapeHtml(t.id)}">
+                    <div class="tx-left">
+                      <span class="cat-badge" style="background:${escapeHtml(cat.color)}20;color:${escapeHtml(cat.color)}">
+                        ${svgIcon(cat.icon, 18)}
+                      </span>
+                      <div class="tx-info">
+                        <div class="tx-cat">${escapeHtml(cat.name)}</div>
+                        ${t.comment ? `<div class="tx-comment">${escapeHtml(t.comment)}</div>` : ''}
+                      </div>
+                    </div>
+                    <div class="tx-amount num ${t.type === 'income' ? 'text-income' : 'text-expense'}">
+                      ${formatMoney(t.amount, { type: t.type })}
+                    </div>
+                  </button>
+                `;
+              })
+              .join('')}
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+
+  container.querySelectorAll('[data-edit-tx]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tx = state.transactions.find((t) => t.id === btn.dataset.editTx);
+      if (tx) openTransactionSheet(tx);
+    });
+  });
+}
+
+// ============================================================
+// CATEGORIES TAB
+// ============================================================
+function renderCategoriesTab() {
+  const counts = new Map();
+  for (const t of state.transactions) {
+    counts.set(t.categoryId, (counts.get(t.categoryId) || 0) + 1);
+  }
+
+  const renderGroup = (type, title) => {
+    const list = state.categories.filter((c) => c.type === type);
+    return `
+      <section class="stack">
+        <div class="section-header" style="margin-bottom:0;">
+          <h2 class="section-title">${title}</h2>
+          <button type="button" class="btn btn-secondary btn-sm" data-add-cat="${type}">+ Добавить</button>
+        </div>
+        <div class="cat-manage-grid">
+          ${list
+            .map((cat) => {
+              const cnt = counts.get(cat.id) || 0;
+              return `
+                <div class="cat-card">
+                  <div class="cat-card-main">
+                    <span class="cat-badge" style="background:${escapeHtml(cat.color)}20;color:${escapeHtml(cat.color)}">
+                      ${svgIcon(cat.icon, 18)}
+                    </span>
+                    <div style="min-width:0;">
+                      <div class="tx-cat">${escapeHtml(cat.name)}</div>
+                      <div class="cat-card-meta num">${cnt} опер.</div>
+                    </div>
+                  </div>
+                  <div style="display:flex;gap:2px;">
+                    <button type="button" class="icon-btn" data-edit-cat="${escapeHtml(cat.id)}" aria-label="Редактировать">
+                      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                    </button>
+                    ${
+                      list.length > 1
+                        ? `<button type="button" class="icon-btn" data-del-cat="${escapeHtml(cat.id)}" aria-label="Удалить">
+                             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+                           </button>`
+                        : ''
+                    }
+                  </div>
+                </div>
+              `;
+            })
+            .join('')}
+        </div>
+      </section>
+    `;
+  };
+
+  mainEl.innerHTML = `
+    <div class="stack" style="gap:22px;">
+      ${renderGroup('expense', 'Категории расходов')}
+      ${renderGroup('income', 'Категории доходов')}
+    </div>
+  `;
+
+  mainEl.querySelectorAll('[data-add-cat]').forEach((btn) => {
+    btn.addEventListener('click', () => openCategorySheet(null, btn.dataset.addCat));
+  });
+  mainEl.querySelectorAll('[data-edit-cat]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const cat = state.categories.find((c) => c.id === btn.dataset.editCat);
+      if (cat) openCategorySheet(cat);
+    });
+  });
+  mainEl.querySelectorAll('[data-del-cat]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const cat = state.categories.find((c) => c.id === btn.dataset.delCat);
+      if (cat) openDeleteCategorySheet(cat);
+    });
+  });
+}
+
+// ============================================================
+// SETTINGS TAB
+// ============================================================
+function renderSettingsTab() {
+  const txCount = state.transactions.length;
+  const hasDemo = state.transactions.some((t) => t.isDemo);
+  const lastBackup = state.settings.lastBackupAt;
+  const daysSinceBackup = lastBackup ? Math.floor((Date.now() - lastBackup) / 86400000) : null;
+  const needsBackup = txCount > 0 && (daysSinceBackup === null || daysSinceBackup >= 30);
+
+  const backupLabel = lastBackup
+    ? new Date(lastBackup).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : 'ещё не создавался';
+
+  mainEl.innerHTML = `
+    <div class="stack">
+      ${
+        needsBackup
+          ? `<div class="alert-banner">
+               <span>${daysSinceBackup === null ? 'Рекомендуем сделать первый JSON-бэкап данных.' : `Бэкап не делался уже ${daysSinceBackup} дн. Сохраните копию.`}</span>
+               <button type="button" class="btn btn-primary btn-sm" id="quickBackupBtn">Сохранить бэкап</button>
+             </div>`
+          : ''
+      }
+
+      <section class="card settings-group">
+        <h2 class="section-title">Внешний вид и валюта</h2>
+        <div class="setting-row">
+          <div>
+            <div class="setting-title">Валюта</div>
+            <div class="setting-desc">Символ отображения сумм</div>
+          </div>
+          <div class="segmented">
+            ${['₽', '$', '€']
+              .map((c) => `<button type="button" class="seg-btn ${state.settings.currency === c ? 'active' : ''}" data-set-currency="${c}">${c}</button>`)
+              .join('')}
+          </div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-title">Тема оформления</div>
+            <div class="setting-desc">Системная, светлая или тёмная</div>
+          </div>
+          <div class="segmented">
+            ${[
+              ['system', 'Система'],
+              ['light', 'Светлая'],
+              ['dark', 'Тёмная'],
+            ]
+              .map(([v, label]) => `<button type="button" class="seg-btn ${state.settings.theme === v ? 'active' : ''}" data-set-theme="${v}">${label}</button>`)
+              .join('')}
+          </div>
+        </div>
+      </section>
+
+      <section class="card settings-group">
+        <h2 class="section-title">Данные и резервные копии</h2>
+        <div class="setting-row">
+          <div>
+            <div class="setting-title">Локальное хранилище (IndexedDB)</div>
+            <div class="setting-desc num">Сохранено операций: <strong>${txCount}</strong> · Последний бэкап: ${escapeHtml(backupLabel)}</div>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary" id="importCsvBtn">Импорт CSV</button>
+          <button type="button" class="btn btn-secondary" id="exportCsvBtn">Экспорт CSV</button>
+          <button type="button" class="btn btn-secondary" id="exportJsonBtn">Бэкап JSON</button>
+          <button type="button" class="btn btn-secondary" id="importJsonBtn">Восстановить JSON</button>
+        </div>
+
+        <input type="file" id="csvFileInput" accept=".csv,text/csv" hidden>
+        <input type="file" id="jsonFileInput" accept=".json,application/json" hidden>
+      </section>
+
+      <section class="card settings-group">
+        <h2 class="section-title">Сброс данных</h2>
+        <div class="btn-row">
+          ${hasDemo ? '<button type="button" class="btn btn-secondary" id="clearDemoBtn">Очистить демо-данные</button>' : ''}
+          <button type="button" class="btn btn-danger" id="clearAllBtn">Удалить все данные</button>
+        </div>
+      </section>
+    </div>
+  `;
+
+  mainEl.querySelectorAll('[data-set-currency]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await setSetting('currency', btn.dataset.setCurrency);
+      state.settings.currency = btn.dataset.setCurrency;
+      renderSettingsTab();
+      showToast(`Валюта изменена на ${btn.dataset.setCurrency}`);
+    });
+  });
+
+  mainEl.querySelectorAll('[data-set-theme]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await setSetting('theme', btn.dataset.setTheme);
+      state.settings.theme = btn.dataset.setTheme;
+      applyTheme();
+      renderSettingsTab();
+    });
+  });
+
+  document.getElementById('quickBackupBtn')?.addEventListener('click', handleExportJson);
+  document.getElementById('exportJsonBtn')?.addEventListener('click', handleExportJson);
+  document.getElementById('exportCsvBtn')?.addEventListener('click', handleExportCsv);
+
+  const csvInput = document.getElementById('csvFileInput');
+  document.getElementById('importCsvBtn')?.addEventListener('click', () => csvInput.click());
+  csvInput?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      openCsvImportPreview(text, file.name);
+    } catch (err) {
+      showToast(`Ошибка чтения CSV: ${err.message}`);
+    }
+  });
+
+  const jsonInput = document.getElementById('jsonFileInput');
+  document.getElementById('importJsonBtn')?.addEventListener('click', () => jsonInput.click());
+  jsonInput?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      openRestoreJsonConfirmSheet(parsed, file.name);
+    } catch {
+      showToast('Не удалось прочитать JSON-файл резервной копии');
+    }
+  });
+
+  document.getElementById('clearDemoBtn')?.addEventListener('click', async () => {
+    const removed = await clearDemoData();
+    await reloadData();
+    renderSettingsTab();
+    showToast(`Удалено демо-операций: ${removed}`);
+  });
+
+  document.getElementById('clearAllBtn')?.addEventListener('click', () => {
+    openClearAllConfirmSheet();
+  });
+}
+
+// ============================================================
+// QUICK ENTRY & EDIT TRANSACTION SHEET
+// ============================================================
+function openTransactionSheet(existingTx = null) {
+  const type = existingTx ? existingTx.type : 'expense';
+  const catsOfType = state.categories.filter((c) => c.type === type);
+  state.activeSheet = 'tx';
+  state.txForm = {
+    id: existingTx ? existingTx.id : null,
+    type,
+    expr: existingTx ? String(existingTx.amount) : '',
+    categoryId: existingTx ? existingTx.categoryId : catsOfType[0]?.id || '',
+    date: existingTx ? existingTx.date : todayISO(0),
+    comment: existingTx ? existingTx.comment || '' : '',
+    createdAt: existingTx ? existingTx.createdAt : null,
+  };
+  renderTransactionSheet();
+  openSheetBackdrop();
+  if (!existingTx) {
+    setTimeout(() => document.getElementById('txAmountInput')?.focus(), 50);
+  }
+}
+
+function evalAmountExpr(expr) {
+  const clean = String(expr || '')
+    .replace(/,/g, '.')
+    .replace(/−/g, '-')
+    .replace(/[^0-9.+\-]/g, '');
+  if (!clean) return 0;
+  // Safe tokenizer for + and -
+  const tokens = clean.match(/[+\-]?[0-9]*\.?[0-9]+/g);
+  if (!tokens) return 0;
+  let sum = 0;
+  for (const tok of tokens) {
+    const n = parseFloat(tok);
+    if (Number.isFinite(n)) sum += n;
+  }
+  return Math.round(sum * 100) / 100;
+}
+
+function renderTransactionSheet() {
+  const f = state.txForm;
+  const cats = state.categories.filter((c) => c.type === f.type);
+  if (!cats.some((c) => c.id === f.categoryId) && cats[0]) {
+    f.categoryId = cats[0].id;
+  }
+  const evaluated = evalAmountExpr(f.expr);
+  const hasOp = /[+\-]/.test(f.expr.slice(1));
+  const cur = state.settings.currency || '₽';
+
+  sheetContainer.innerHTML = `
+    <div class="sheet-header">
+      <h3 class="sheet-title">${f.id ? 'Редактировать операцию' : 'Новая операция'}</h3>
+      <button type="button" class="icon-btn" id="closeSheetBtn" aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="segmented segmented-full">
+      <button type="button" class="seg-btn ${f.type === 'expense' ? 'active' : ''}" data-tx-type="expense">Расход</button>
+      <button type="button" class="seg-btn ${f.type === 'income' ? 'active' : ''}" data-tx-type="income">Доход</button>
+    </div>
+
+    <div class="amount-display-box">
+      <div class="amount-expr num" id="amountExprHint">${hasOp ? `= ${evaluated.toLocaleString('ru-RU')}\u00A0${cur}` : ''}</div>
+      <div class="amount-input-row">
+        <input
+          type="text"
+          inputmode="decimal"
+          autocomplete="off"
+          class="amount-input num ${f.type === 'income' ? 'text-income' : 'text-expense'}"
+          id="txAmountInput"
+          placeholder="0"
+          value="${escapeHtml(f.expr)}"
+          aria-label="Сумма операции"
+        >
+        <span class="amount-currency ${f.type === 'income' ? 'text-income' : 'text-expense'}">${cur}</span>
+      </div>
+    </div>
+
+    <div class="cat-picker-grid">
+      ${cats
+        .map(
+          (c) => `
+        <button type="button" class="cat-pick-btn ${f.categoryId === c.id ? 'selected' : ''}" data-pick-cat="${escapeHtml(c.id)}">
+          <span class="cat-badge" style="background:${escapeHtml(c.color)}20;color:${escapeHtml(c.color)}">
+            ${svgIcon(c.icon, 18)}
+          </span>
+          <span class="cat-pick-label">${escapeHtml(c.name)}</span>
+        </button>
+      `
+        )
+        .join('')}
+    </div>
+
+    <div class="date-comment-row">
+      <div class="date-chips">
+        <button type="button" class="chip-btn ${f.date === todayISO(0) ? 'active' : ''}" data-quick-date="${todayISO(0)}">Сегодня</button>
+        <button type="button" class="chip-btn ${f.date === todayISO(-1) ? 'active' : ''}" data-quick-date="${todayISO(-1)}">Вчера</button>
+        <input type="date" class="date-input-inline" id="txDateInput" value="${escapeHtml(f.date)}">
+      </div>
+      <input type="text" class="input" id="txCommentInput" placeholder="Комментарий (необязательно)" value="${escapeHtml(f.comment)}" maxlength="120">
+    </div>
+
+    <div class="stack" style="gap:8px;">
+      <button type="button" class="btn btn-primary btn-full" id="saveTxBtn">${f.id ? 'Сохранить изменения' : 'Добавить операцию'}</button>
+      ${f.id ? '<button type="button" class="btn btn-danger btn-full" id="deleteTxBtn">Удалить операцию</button>' : ''}
+    </div>
+  `;
+
+  document.getElementById('closeSheetBtn')?.addEventListener('click', closeSheet);
+  sheetContainer.querySelectorAll('[data-tx-type]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      f.type = btn.dataset.txType;
+      renderTransactionSheet();
+    });
+  });
+  sheetContainer.querySelectorAll('[data-pick-cat]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      f.categoryId = btn.dataset.pickCat;
+      renderTransactionSheet();
+    });
+  });
+  sheetContainer.querySelectorAll('[data-quick-date]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      f.date = btn.dataset.quickDate;
+      renderTransactionSheet();
+    });
+  });
+  document.getElementById('txDateInput')?.addEventListener('change', (e) => {
+    f.date = e.target.value || todayISO(0);
+    renderTransactionSheet();
+  });
+  document.getElementById('txCommentInput')?.addEventListener('input', (e) => {
+    f.comment = e.target.value;
+  });
+  const amountInput = document.getElementById('txAmountInput');
+  amountInput?.addEventListener('input', (e) => {
+    f.expr = e.target.value.replace(/[^0-9.,+\-\s]/g, '');
+    if (e.target.value !== f.expr) e.target.value = f.expr;
+    const hint = document.getElementById('amountExprHint');
+    if (hint) {
+      const hasMath = /[+\-]/.test(f.expr.trim().slice(1));
+      hint.textContent = hasMath ? `= ${evalAmountExpr(f.expr).toLocaleString('ru-RU')}\u00A0${cur}` : '';
+    }
+  });
+  document.getElementById('saveTxBtn')?.addEventListener('click', handleSaveTransaction);
+  document.getElementById('deleteTxBtn')?.addEventListener('click', handleDeleteTransaction);
+}
+
+async function handleSaveTransaction() {
+  const f = state.txForm;
+  if (!f) return;
+  const amount = evalAmountExpr(f.expr);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    showToast('Введите сумму больше 0');
+    return;
+  }
+  if (!f.categoryId) {
+    showToast('Выберите категорию');
+    return;
+  }
+  const saved = await saveTransaction({
+    id: f.id,
+    type: f.type,
+    amount,
+    categoryId: f.categoryId,
+    date: f.date || todayISO(0),
+    comment: f.comment,
+    createdAt: f.createdAt || Date.now(),
+  });
+  await reloadData();
+  state.monthKey = saved.date.slice(0, 7);
+  closeSheet();
+  renderMain();
+  showToast(f.id ? 'Операция обновлена' : 'Операция добавлена');
+}
+
+async function handleDeleteTransaction() {
+  const f = state.txForm;
+  if (!f || !f.id) return;
+  const backup = state.transactions.find((t) => t.id === f.id);
+  if (!backup) return;
+  await deleteTransaction(backup.id);
+  await reloadData();
+  closeSheet();
+  renderMain();
+  showToast('Операция удалена', {
+    actionLabel: 'Отменить',
+    duration: 4000,
+    onAction: async () => {
+      await saveTransaction(backup);
+      await reloadData();
+      renderMain();
+      showToast('Операция восстановлена');
+    },
+  });
+}
+
+// ============================================================
+// CATEGORY SHEETS
+// ============================================================
+function openCategorySheet(existing = null, defaultType = 'expense') {
+  state.activeSheet = 'category';
+  state.catForm = {
+    id: existing ? existing.id : null,
+    name: existing ? existing.name : '',
+    type: existing ? existing.type : defaultType,
+    icon: existing ? existing.icon : 'tag',
+    color: existing ? existing.color : PALETTE[0],
+    order: existing ? existing.order : state.categories.length + 1,
+  };
+  renderCategorySheet();
+  openSheetBackdrop();
+}
+
+function renderCategorySheet() {
+  const c = state.catForm;
+  sheetContainer.innerHTML = `
+    <div class="sheet-header">
+      <h3 class="sheet-title">${c.id ? 'Редактировать категорию' : 'Новая категория'}</h3>
+      <button type="button" class="icon-btn" id="closeSheetBtn" aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="stack">
+      <div>
+        <div class="muted-label">Название</div>
+        <input type="text" class="input" id="catNameInput" value="${escapeHtml(c.name)}" placeholder="Например, Спорт или Такси" maxlength="40">
+      </div>
+
+      ${
+        c.id
+          ? ''
+          : `<div class="segmented segmented-full">
+               <button type="button" class="seg-btn ${c.type === 'expense' ? 'active' : ''}" data-cat-type="expense">Расход</button>
+               <button type="button" class="seg-btn ${c.type === 'income' ? 'active' : ''}" data-cat-type="income">Доход</button>
+             </div>`
+      }
+
+      <div>
+        <div class="muted-label">Цвет</div>
+        <div class="color-picker-row">
+          ${PALETTE.map((hex) => `<button type="button" class="color-dot ${c.color === hex ? 'selected' : ''}" data-cat-color="${hex}" style="background:${hex}" aria-label="${hex}"></button>`).join('')}
+        </div>
+      </div>
+
+      <div>
+        <div class="muted-label">Иконка</div>
+        <div class="icon-picker-grid">
+          ${Object.keys(ICONS)
+            .map((key) => `<button type="button" class="icon-pick-cell ${c.icon === key ? 'selected' : ''}" data-cat-icon="${key}" aria-label="${key}">${svgIcon(key, 19)}</button>`)
+            .join('')}
+        </div>
+      </div>
+
+      <button type="button" class="btn btn-primary btn-full" id="saveCatBtn">Сохранить</button>
+    </div>
+  `;
+
+  document.getElementById('closeSheetBtn')?.addEventListener('click', closeSheet);
+  document.getElementById('catNameInput')?.addEventListener('input', (e) => {
+    c.name = e.target.value;
+  });
+  sheetContainer.querySelectorAll('[data-cat-type]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      c.type = btn.dataset.catType;
+      renderCategorySheet();
+    });
+  });
+  sheetContainer.querySelectorAll('[data-cat-color]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      c.color = btn.dataset.catColor;
+      renderCategorySheet();
+    });
+  });
+  sheetContainer.querySelectorAll('[data-cat-icon]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      c.icon = btn.dataset.catIcon;
+      renderCategorySheet();
+    });
+  });
+  document.getElementById('saveCatBtn')?.addEventListener('click', async () => {
+    const name = c.name.trim();
+    if (!name) {
+      showToast('Введите название категории');
+      return;
+    }
+    await saveCategory({ ...c, name });
+    await reloadData();
+    closeSheet();
+    renderMain();
+    showToast(c.id ? 'Категория обновлена' : 'Категория создана');
+  });
+}
+
+function openDeleteCategorySheet(cat) {
+  const linkedCount = state.transactions.filter((t) => t.categoryId === cat.id).length;
+  const alternatives = state.categories.filter((c) => c.type === cat.type && c.id !== cat.id);
+  const defaultTarget =
+    alternatives.find((c) => c.name.toLowerCase() === 'прочее' || c.name.toLowerCase() === 'другое') || alternatives[0];
+
+  state.activeSheet = 'deleteCat';
+  sheetContainer.innerHTML = `
+    <div class="sheet-header">
+      <h3 class="sheet-title">Удалить «${escapeHtml(cat.name)}»?</h3>
+      <button type="button" class="icon-btn" id="closeSheetBtn" aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="stack">
+      ${
+        linkedCount > 0
+          ? `<div class="setting-desc">В этой категории <strong>${linkedCount}</strong> опер. Выберите, куда их перенести:</div>
+             <select class="select" id="reassignCatSelect">
+               ${alternatives.map((a) => `<option value="${escapeHtml(a.id)}" ${defaultTarget && a.id === defaultTarget.id ? 'selected' : ''}>${escapeHtml(a.name)}</option>`).join('')}
+             </select>`
+          : '<div class="setting-desc">В этой категории нет операций. Она будет удалена без потерь.</div>'
+      }
+      <div class="btn-row">
+        <button type="button" class="btn btn-secondary" id="cancelDelCatBtn" style="flex:1">Отмена</button>
+        <button type="button" class="btn btn-danger" id="confirmDelCatBtn" style="flex:1">Удалить</button>
+      </div>
+    </div>
+  `;
+  openSheetBackdrop();
+  document.getElementById('closeSheetBtn')?.addEventListener('click', closeSheet);
+  document.getElementById('cancelDelCatBtn')?.addEventListener('click', closeSheet);
+  document.getElementById('confirmDelCatBtn')?.addEventListener('click', async () => {
+    const targetId = document.getElementById('reassignCatSelect')?.value || defaultTarget?.id || null;
+    await deleteCategoryAndReassign(cat.id, targetId);
+    await reloadData();
+    closeSheet();
+    renderMain();
+    showToast(`Категория «${cat.name}» удалена`);
+  });
+}
+
+// ============================================================
+// CSV IMPORT / EXPORT & JSON BACKUP
+// ============================================================
+function parseCsvText(rawText) {
+  const text = rawText.replace(/^\uFEFF/, '').trim();
+  if (!text) throw new Error('Файл пуст');
+
+  // Detect delimiter from first line outside quotes
+  const firstLine = text.split(/\r?\n/)[0] || '';
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  const semiCount = (firstLine.match(/;/g) || []).length;
+  const delimiter = semiCount > commaCount ? ';' : ',';
+
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (inQuotes) {
+      if (ch === '"' && next === '"') {
+        cell += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        cell += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === delimiter) {
+      row.push(cell);
+      cell = '';
+    } else if (ch === '\r' && next === '\n') {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+      i++;
+    } else if (ch === '\n' || ch === '\r') {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell);
+    rows.push(row);
+  }
+
+  if (rows.length < 2) throw new Error('Нет строк с операциями');
+
+  const header = rows[0].map((h) => h.trim().toLowerCase());
+  const idx = {
+    date: header.indexOf('date'),
+    type: header.indexOf('type'),
+    amount: header.indexOf('amount'),
+    category: header.indexOf('category'),
+    comment: header.indexOf('comment'),
+  };
+  if (idx.date === -1 || idx.type === -1 || idx.amount === -1 || idx.category === -1) {
+    throw new Error('Ожидаются колонки: date, type, amount, category, comment');
+  }
+
+  const parsed = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r || r.every((v) => !v.trim())) continue;
+    const date = (r[idx.date] || '').trim();
+    const rawType = (r[idx.type] || '').trim().toLowerCase();
+    const type = rawType === 'income' || rawType === 'доход' ? 'income' : rawType === 'expense' || rawType === 'расход' ? 'expense' : null;
+    const amount = parseFloat((r[idx.amount] || '').replace(/\s+/g, '').replace(',', '.'));
+    const category = (r[idx.category] || '').trim() || 'Прочее';
+    const comment = idx.comment >= 0 ? (r[idx.comment] || '').trim() : '';
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !type || !Number.isFinite(amount) || amount <= 0) {
+      continue;
+    }
+    parsed.push({
+      date,
+      type,
+      amount: Math.round(amount * 100) / 100,
+      category,
+      comment,
+    });
+  }
+
+  if (parsed.length === 0) throw new Error('Не найдено валидных операций');
+  return parsed;
+}
+
+function makeDedupKey(date, type, amount, categoryName, comment) {
+  return `${date}|${type}|${Number(amount).toFixed(2)}|${categoryName.trim().toLowerCase()}|${(comment || '').trim().toLowerCase()}`;
+}
+
+function openCsvImportPreview(csvText, fileName) {
+  const rows = parseCsvText(csvText);
+  const existingCatKeys = new Set(state.categories.map((c) => `${c.type}|${c.name.trim().toLowerCase()}`));
+  const newCatsMap = new Map();
+  for (const r of rows) {
+    const key = `${r.type}|${r.category.toLowerCase()}`;
+    if (!existingCatKeys.has(key) && !newCatsMap.has(key)) {
+      newCatsMap.set(key, { name: r.category, type: r.type });
+    }
+  }
+
+  const catMap = getCategoryMap();
+  const existingTxKeys = new Set(
+    state.transactions.map((t) => makeDedupKey(t.date, t.type, t.amount, catMap.get(t.categoryId)?.name || '', t.comment))
+  );
+  let duplicateCount = 0;
+  for (const r of rows) {
+    if (existingTxKeys.has(makeDedupKey(r.date, r.type, r.amount, r.category, r.comment))) {
+      duplicateCount += 1;
+    }
+  }
+
+  const dates = rows.map((r) => r.date).sort();
+  const newCats = [...newCatsMap.values()];
+
+  state.activeSheet = 'csvImport';
+  state.csvPreview = { rows, newCats, duplicateCount, skipDuplicates: true };
+
+  sheetContainer.innerHTML = `
+    <div class="sheet-header">
+      <h3 class="sheet-title">Импорт CSV</h3>
+      <button type="button" class="icon-btn" id="closeSheetBtn" aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="stack">
+      <div class="preview-box">
+        <div><strong>Файл:</strong> ${escapeHtml(fileName)}</div>
+        <div class="num"><strong>Найдено операций:</strong> ${rows.length}</div>
+        <div class="num"><strong>Период:</strong> ${dates[0]} — ${dates[dates.length - 1]}</div>
+        <div class="num"><strong>Совпадений с уже загруженными:</strong> ${duplicateCount}</div>
+        <div>
+          <strong>Новые категории (${newCats.length}):</strong>
+          ${newCats.length ? escapeHtml(newCats.map((c) => c.name).join(', ')) : 'не требуются'}
+        </div>
+      </div>
+
+      <label class="checkbox-row">
+        <input type="checkbox" id="skipDupCheckbox" checked>
+        <span>Пропускать дубликаты (дата + тип + сумма + категория + комментарий)</span>
+      </label>
+
+      <div class="btn-row">
+        <button type="button" class="btn btn-secondary" id="cancelCsvBtn" style="flex:1">Отмена</button>
+        <button type="button" class="btn btn-primary" id="confirmCsvBtn" style="flex:1">Импортировать</button>
+      </div>
+    </div>
+  `;
+
+  openSheetBackdrop();
+  document.getElementById('closeSheetBtn')?.addEventListener('click', closeSheet);
+  document.getElementById('cancelCsvBtn')?.addEventListener('click', closeSheet);
+  document.getElementById('confirmCsvBtn')?.addEventListener('click', async () => {
+    const skipDuplicates = document.getElementById('skipDupCheckbox')?.checked ?? true;
+    await executeCsvImport(rows, newCats, skipDuplicates);
+  });
+}
+
+async function executeCsvImport(rows, newCats, skipDuplicates) {
+  const iconKeys = Object.keys(ICONS);
+  let colorIdx = state.categories.length;
+  for (const nc of newCats) {
+    await saveCategory({
+      name: nc.name,
+      type: nc.type,
+      icon: iconKeys[colorIdx % iconKeys.length],
+      color: PALETTE[colorIdx % PALETTE.length],
+      order: 100 + colorIdx,
+    });
+    colorIdx += 1;
+  }
+
+  const allCats = await getAllCategories();
+  const catByKey = new Map(allCats.map((c) => [`${c.type}|${c.name.trim().toLowerCase()}`, c]));
+  const catById = new Map(allCats.map((c) => [c.id, c]));
+
+  const existingKeys = new Set(
+    state.transactions.map((t) => makeDedupKey(t.date, t.type, t.amount, catById.get(t.categoryId)?.name || '', t.comment))
+  );
+
+  const toAdd = [];
+  let skipped = 0;
+  const now = Date.now();
+  rows.forEach((r, idx) => {
+    const dedup = makeDedupKey(r.date, r.type, r.amount, r.category, r.comment);
+    if (skipDuplicates && existingKeys.has(dedup)) {
+      skipped += 1;
+      return;
+    }
+    const cat = catByKey.get(`${r.type}|${r.category.toLowerCase()}`);
+    if (!cat) return;
+    toAdd.push({
+      id: generateId('tx'),
+      type: r.type,
+      amount: r.amount,
+      categoryId: cat.id,
+      date: r.date,
+      comment: r.comment,
+      createdAt: now + idx,
+    });
+  });
+
+  if (toAdd.length > 0) {
+    await bulkSaveTransactions(toAdd);
+  }
+  await setSetting('demoCleared', true);
+  await reloadData();
+  if (toAdd.length > 0) {
+    const latestDate = toAdd.map((t) => t.date).sort().pop();
+    if (latestDate) state.monthKey = latestDate.slice(0, 7);
+  }
+  closeSheet();
+  renderMain();
+  showToast(`Импортировано: ${toAdd.length}${skipped ? `, пропущено дублей: ${skipped}` : ''}`);
+}
+
+function csvEscape(value) {
+  const s = String(value ?? '');
+  return /[",\n\r;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function handleExportCsv() {
+  const catMap = getCategoryMap();
+  const lines = ['date,type,amount,category,comment'];
+  const sorted = [...state.transactions].sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt || 0) - (b.createdAt || 0));
+  for (const t of sorted) {
+    const catName = catMap.get(t.categoryId)?.name || 'Прочее';
+    lines.push([
+      t.date,
+      t.type,
+      Number(t.amount).toFixed(2),
+      csvEscape(catName),
+      csvEscape(t.comment || ''),
+    ].join(','));
+  }
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  downloadBlob(blob, `moneta-export-${todayISO(0)}.csv`);
+  showToast(`Экспортировано операций: ${sorted.length}`);
+}
+
+async function handleExportJson() {
+  const payload = await exportFullBackup();
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8;' });
+  downloadBlob(blob, `moneta-backup-${todayISO(0)}.json`);
+  await reloadData();
+  if (state.tab === 'settings') renderSettingsTab();
+  showToast('Резервная копия JSON сохранена');
+}
+
+function openRestoreJsonConfirmSheet(backupObj, fileName) {
+  const txCnt = backupObj?.data?.transactions?.length ?? 0;
+  const catCnt = backupObj?.data?.categories?.length ?? 0;
+  state.activeSheet = 'restoreJson';
+  sheetContainer.innerHTML = `
+    <div class="sheet-header">
+      <h3 class="sheet-title">Восстановить из JSON?</h3>
+      <button type="button" class="icon-btn" id="closeSheetBtn" aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="stack">
+      <div class="preview-box">
+        <div><strong>Файл:</strong> ${escapeHtml(fileName)}</div>
+        <div class="num"><strong>Операций:</strong> ${txCnt} · <strong>Категорий:</strong> ${catCnt}</div>
+        <div>Текущие данные на этом устройстве будут заменены содержимым резервной копии.</div>
+      </div>
+      <div class="btn-row">
+        <button type="button" class="btn btn-secondary" id="cancelRestoreBtn" style="flex:1">Отмена</button>
+        <button type="button" class="btn btn-primary" id="confirmRestoreBtn" style="flex:1">Восстановить</button>
+      </div>
+    </div>
+  `;
+  openSheetBackdrop();
+  document.getElementById('closeSheetBtn')?.addEventListener('click', closeSheet);
+  document.getElementById('cancelRestoreBtn')?.addEventListener('click', closeSheet);
+  document.getElementById('confirmRestoreBtn')?.addEventListener('click', async () => {
+    try {
+      await importFullBackup(backupObj);
+      await reloadData();
+      closeSheet();
+      renderMain();
+      showToast(`Восстановлено операций: ${txCnt}`);
+    } catch (err) {
+      showToast(err.message || 'Ошибка восстановления');
+    }
+  });
+}
+
+function openClearAllConfirmSheet() {
+  let step = 1;
+  state.activeSheet = 'clearAll';
+  const renderConfirm = () => {
+    sheetContainer.innerHTML = `
+      <div class="sheet-header">
+        <h3 class="sheet-title">${step === 1 ? 'Удалить все данные?' : 'Подтвердите удаление'}</h3>
+        <button type="button" class="icon-btn" id="closeSheetBtn" aria-label="Закрыть">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="stack">
+        <div class="setting-desc">
+          ${
+            step === 1
+              ? `Будут удалены все операции (${state.transactions.length}) и пользовательские категории. Это действие нельзя отменить без JSON-бэкапа.`
+              : 'Нажмите «Удалить навсегда» для полного сброса локальной базы данных.'
+          }
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn btn-secondary" id="cancelClearBtn" style="flex:1">Отмена</button>
+          <button type="button" class="btn btn-danger" id="confirmClearBtn" style="flex:1">
+            ${step === 1 ? 'Продолжить' : 'Удалить навсегда'}
+          </button>
+        </div>
+      </div>
+    `;
+    document.getElementById('closeSheetBtn')?.addEventListener('click', closeSheet);
+    document.getElementById('cancelClearBtn')?.addEventListener('click', closeSheet);
+    document.getElementById('confirmClearBtn')?.addEventListener('click', async () => {
+      if (step === 1) {
+        step = 2;
+        renderConfirm();
+      } else {
+        await clearAllData();
+        await reloadData();
+        closeSheet();
+        renderMain();
+        showToast('Все данные удалены');
+      }
+    });
+  };
+  renderConfirm();
+  openSheetBackdrop();
+}
+
+// ============================================================
+// SHEET HELPERS & KEYBOARD
+// ============================================================
+function openSheetBackdrop() {
+  sheetBackdrop.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
+function closeSheet() {
+  sheetBackdrop.hidden = true;
+  document.body.style.overflow = '';
+  state.activeSheet = null;
+  state.txForm = null;
+  state.catForm = null;
+  state.csvPreview = null;
+}
+
+sheetBackdrop.addEventListener('click', (e) => {
+  if (e.target === sheetBackdrop) closeSheet();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !sheetBackdrop.hidden) {
+    closeSheet();
+    return;
+  }
+  if (state.activeSheet === 'tx' && e.key === 'Enter') {
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT') {
+      e.preventDefault();
+      handleSaveTransaction();
+    }
+  }
+});
+
+// ============================================================
+// BOOTSTRAP
+// ============================================================
+async function bootstrap() {
+  // Inject bottom nav icons
+  document.querySelectorAll('[data-nav-icon]').forEach((el) => {
+    const key = el.dataset.navIcon;
+    el.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_ICONS[key] || ''}</svg>`;
+  });
+
+  document.querySelectorAll('[data-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => setTab(btn.dataset.tab));
+  });
+
+  document.getElementById('brandBtn')?.addEventListener('click', () => setTab('overview'));
+  document.getElementById('desktopAddBtn')?.addEventListener('click', () => openTransactionSheet());
+  document.getElementById('mobileAddBtn')?.addEventListener('click', () => openTransactionSheet());
+
+  window.addEventListener('online', updateOnlineStatus);
+  window.addEventListener('offline', updateOnlineStatus);
+  updateOnlineStatus();
+
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+  }
+
+  await initDatabase();
+  await reloadData();
+  setTab('overview');
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js', { scope: './' }).catch((err) => {
+      console.warn('SW registration failed:', err);
+    });
+  }
+}
+
+bootstrap();

@@ -1,0 +1,8 @@
+.DS_Store
+*.csv
+*.mmbackup
+moneta-backup-*.json
+*.sqlite
+*.db
+.tmp/
+*.log

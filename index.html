@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f8fafc" id="themeColorMeta">
+  <meta name="description" content="Монета — минималистичный приватный офлайн-учёт личных финансов">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Монета">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <title>Монета — личные финансы</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="top-bar">
+      <div class="top-bar-inner">
+        <div class="brand" id="brandBtn" role="button" tabindex="0" aria-label="Монета — на главную">
+          <span class="brand-mark" aria-hidden="true">М</span>
+          <span class="brand-name">Монета</span>
+          <span class="offline-pill" id="offlineBadge" hidden>Офлайн</span>
+        </div>
+
+        <nav class="desktop-nav" aria-label="Основная навигация">
+          <button type="button" class="nav-pill" data-tab="overview">Обзор</button>
+          <button type="button" class="nav-pill" data-tab="transactions">Операции</button>
+          <button type="button" class="nav-pill" data-tab="categories">Категории</button>
+          <button type="button" class="nav-pill" data-tab="settings">Настройки</button>
+        </nav>
+
+        <button type="button" class="btn btn-primary desktop-add-btn" id="desktopAddBtn">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          <span>Добавить</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="main-content" id="mainContent" aria-live="polite"></main>
+
+    <nav class="bottom-nav" aria-label="Мобильная навигация">
+      <button type="button" class="bottom-nav-item" data-tab="overview">
+        <span class="bottom-nav-icon" data-nav-icon="overview"></span>
+        <span>Обзор</span>
+      </button>
+      <button type="button" class="bottom-nav-item" data-tab="transactions">
+        <span class="bottom-nav-icon" data-nav-icon="transactions"></span>
+        <span>Операции</span>
+      </button>
+      <button type="button" class="fab-btn" id="mobileAddBtn" aria-label="Добавить операцию">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button type="button" class="bottom-nav-item" data-tab="categories">
+        <span class="bottom-nav-icon" data-nav-icon="categories"></span>
+        <span>Категории</span>
+      </button>
+      <button type="button" class="bottom-nav-item" data-tab="settings">
+        <span class="bottom-nav-icon" data-nav-icon="settings"></span>
+        <span>Настройки</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Modal / Bottom Sheet host -->
+  <div class="sheet-backdrop" id="sheetBackdrop" hidden>
+    <div class="sheet" id="sheetContainer" role="dialog" aria-modal="true"></div>
+  </div>
+
+  <!-- Toast host -->
+  <div class="toast-host" id="toastHost" aria-live="assertive"></div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
